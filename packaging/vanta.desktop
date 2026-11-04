@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=VANTA Competition Tracker
+Comment=Track competitions, deadlines and reminders
+Exec=/home/USER/.local/bin/vanta
+Icon=vanta
+Terminal=false
+Type=Application
+Categories=Office;
+StartupNotify=true
