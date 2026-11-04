@@ -1,159 +1,181 @@
 # CHRONYX — VANTA Competition Tracker
 
-VANTA is an offline-first Fedora desktop app for tracking competitions, registration deadlines, and event reminders. It opens in its own GTK window and does not launch a web browser. Competition data is kept in a local SQLite database.
+VANTA is an offline-first desktop app for tracking competitions, registration deadlines, and reminders. It uses a local SQLite database and opens its interface in an embedded native webview; it does not launch Brave, Firefox, or another browser.
 
 ## Features
 
 - Track CTFs, hackathons, AI/ML events, robotics competitions, programming contests, scholarships, and other opportunities.
-- Create, view, edit, duplicate, complete, and delete competitions.
-- Save descriptions, organisers, event and registration URLs, start/end dates, registration deadlines, IANA time zones, status, priority, and personal notes.
-- See live countdowns, dashboard summaries, recent activity, and upcoming events.
-- Browse a month, week, day, or agenda calendar.
-- Search and filter competitions by category, status, and priority; sort by start date or registration deadline.
-- Receive Fedora desktop reminders 7 days, 3 days, 1 day, or 1 hour before an event or registration deadline. A custom reminder offset is also available.
-- Export JSON backups and CSV files; import VANTA JSON backups.
-- Choose a dark or light theme.
+- Create, edit, duplicate, complete, and delete events; save descriptions, organisers, links, dates, deadlines, time zones, status, priority, and notes.
+- Live start and deadline countdowns, dashboard summaries, upcoming events, and recent activity.
+- Month, week, day, and agenda calendar views.
+- Search and filter by category, status, and priority; sort by start date or registration deadline.
+- Fedora desktop reminders 7 days, 3 days, 1 day, or 1 hour before starts and registration deadlines; supports a custom hour offset.
+- JSON backup/import, CSV export, and dark/light themes.
+
+## Platform support and test status
+
+| Platform | Desktop view | Installation | Tested here |
+| --- | --- | --- | --- |
+| Fedora Linux | GTK 3 + WebKitGTK 4.1 | Fedora RPM or user install | Yes: frontend build, Python tests, countdown tests, GTK/WebKit imports, and RPM build |
+| Other Linux distributions | GTK 3 + WebKitGTK 4.1 + PyGObject | Install the distribution's matching runtime packages, then use the source launcher | Compatibility is conditional on those packages; not every distribution was available for testing |
+| Windows 10/11 | pywebview + Microsoft Edge WebView2 Runtime | `install-windows.ps1` | Windows branch and APPDATA path have unit/static checks; a Windows machine was not available for a native GUI run |
+
+VANTA's React UI, countdown code, and SQLite service are portable. The native window and notification integration use each operating system's runtime. Linux distribution package names and availability vary; the Fedora RPM is Fedora-specific. Windows needs Python and the WebView2 Runtime. Microsoft's WebView2 distribution options are described in the [WebView2 documentation](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution). pywebview's supported native backends are described in its [installation guide](https://pywebview.flowrl.com/guide/installation.html).
 
 ## Install on Fedora
 
-The repository includes the Fedora 44 RPM `vanta-1.0.0-4.fc44.noarch.rpm`. From the repository directory, install it with:
+The repository includes `vanta-1.0.0-5.fc44.noarch.rpm`:
 
 ```bash
-sudo dnf install ./vanta-1.0.0-4.fc44.noarch.rpm
+sudo dnf install ./vanta-1.0.0-5.fc44.noarch.rpm
 ```
 
-If your Fedora installation already has VANTA's GTK, WebKitGTK, Python, and PyGObject dependencies and you want DNF to skip refreshing repositories, use:
+If the machine is offline and GTK 3, WebKitGTK 4.1, Python, and PyGObject are already installed, skip repository refresh:
 
 ```bash
-sudo dnf install --disablerepo='*' ./vanta-1.0.0-4.fc44.noarch.rpm
+sudo dnf install --disablerepo='*' ./vanta-1.0.0-5.fc44.noarch.rpm
 ```
 
-After installation, open **VANTA Competition Tracker** from the applications menu, or run:
+Launch **VANTA Competition Tracker** from the applications menu or run `vanta` in a terminal.
 
-```bash
-vanta
-```
+### User-level Linux install
 
-The RPM installs a launcher, desktop entry, and application icon. The embedded view uses Fedora's GTK 3 and WebKitGTK 4.1 libraries; it does not require Brave, Firefox, or another browser.
-
-### Install without system-wide RPM installation
-
-From the checked-out repository, run:
+On Linux distributions with Python 3, GTK 3, WebKitGTK 4.1, and PyGObject installed, run:
 
 ```bash
 ./install-user.sh
 ```
 
-This installs the app files under `~/.local/lib/vanta`, creates a launcher at `~/.local/bin/vanta`, and adds an application menu entry and icon for the current user. It does not remove the SQLite database in `~/.local/share/vanta`.
+The script installs app files in `~/.local/lib/vanta`, creates `~/.local/bin/vanta`, and adds a Start-menu equivalent (applications menu) entry and icon. It leaves the database in `~/.local/share/vanta` intact. This script does not install platform libraries; use your distribution's package manager for those.
 
-## First launch and everyday use
+### Linux runtime dependencies
 
-1. Launch VANTA from the applications menu or run `vanta` in a terminal.
-2. Select **Add competition** and enter at least a name, start date/time, and valid IANA time zone (for example, `Africa/Nairobi`).
-3. Add an optional registration deadline, end date, URLs, notes, category, registration status, and priority, then save.
-4. Use the dashboard countdown to follow the nearest event. Select **All Competitions** to search, filter, sort, edit, duplicate, complete, or delete an event. Deletion asks for confirmation.
-5. Open **Calendar** to switch among Month, Week, Day, and Agenda views. Select a calendar entry to open its details.
-6. In **Settings**, change the theme, choose reminder times, create a JSON backup, export CSV, or import a JSON backup.
+The desktop shell requires GTK 3, WebKitGTK 4.1, and PyGObject for the Python interpreter used to launch VANTA. Package names differ by distribution. The Fedora RPM declares Fedora's package names; on other distributions, install the matching GTK 3, WebKitGTK 4.1 typelib/bindings, and Python GObject bindings using that distribution's package manager.
 
-Reminders cover both competition starts and registration deadlines. VANTA checks once a minute and records sent reminder keys in SQLite to prevent duplicate notices. The VANTA desktop process must remain running for reminders to be checked; notification delivery also requires a Fedora graphical session and `notify-send`.
+## Install on Windows
+
+Windows requires Python 3.10+ and the Microsoft Edge WebView2 Runtime. VANTA uses WebView2 inside its own window; it does not open the Edge browser. The first setup installs the Python packages `pywebview` and `winotify` into a private virtual environment, so internet access is needed during setup unless those packages are available from a configured local Python package index. Runtime use is offline.
+
+Open PowerShell in the repository folder and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
+```
+
+The script installs the app under `%LOCALAPPDATA%\Programs\VANTA` and creates a Start menu shortcut. Launch **VANTA Competition Tracker** from Start. Competition data is stored under `%APPDATA%\VANTA\vanta.sqlite3`. Windows notifications use toast notifications through `winotify`.
+
+For a source checkout without installing a shortcut:
+
+```powershell
+python -m pip install -r requirements-windows.txt
+python desktop.py
+```
+
+If the WebView2 Runtime is missing, install Microsoft's [Evergreen WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/), then launch VANTA again.
+
+## First launch and daily use
+
+1. Launch VANTA from the applications menu or Start menu.
+2. Choose **Add competition**. Enter a name, start date/time, and valid IANA time zone, such as `Africa/Nairobi`.
+3. Add optional category, organiser, description, end date, registration deadline, website, registration URL, status, priority, and personal notes.
+4. Use the dashboard to watch the nearest start countdown. **All Competitions** provides search, filters, sorting, and event actions.
+5. Use **Calendar** for Month, Week, Day, or Agenda. Select an entry to open its details.
+6. In **Settings**, change the theme, configure reminders, export a JSON or CSV file, or import a JSON backup.
+
+To receive reminders, leave VANTA running in your desktop session. The scheduler checks once a minute and stores sent reminder keys in SQLite to avoid sending the same reminder twice. Linux needs a session notification bus and `notify-send`; Windows needs working Windows notifications. Completed and cancelled events do not generate reminders.
 
 ## Data, backups, and privacy
 
-The SQLite database is stored at:
+The default database locations are:
 
 ```text
-${XDG_DATA_HOME:-$HOME/.local/share}/vanta/vanta.sqlite3
+Linux:   ${XDG_DATA_HOME:-$HOME/.local/share}/vanta/vanta.sqlite3
+Windows: %APPDATA%\VANTA\vanta.sqlite3
 ```
 
-It contains competition records, reminder preferences, and sent-notification records. VANTA serves its local interface and API on `127.0.0.1:8765`; it does not use a cloud service or require an internet connection after installation.
+SQLite stores competition records, reminder preferences, and sent-notification records. VANTA's local API binds to `127.0.0.1:8765`. No cloud account or network access is needed after installation.
 
-Use **Settings → Backup JSON** for a portable backup and **Settings → Import JSON** to restore/merge events from one. CSV export is intended for spreadsheets and is not an import format. To make a full SQLite backup from a terminal, close VANTA and run:
+Use **Settings → Backup JSON** for a portable event backup and **Settings → Import JSON** to import/merge events. CSV export is for spreadsheets; it is not an import format. To back up the entire SQLite database, close VANTA and run on Linux:
 
 ```bash
 sqlite3 "${XDG_DATA_HOME:-$HOME/.local/share}/vanta/vanta.sqlite3" \
   ".backup '$HOME/vanta-database-backup.sqlite3'"
 ```
 
-Uninstalling the RPM or user-level app files does not delete the database. To remove user-level application files, remove `~/.local/lib/vanta`, `~/.local/bin/vanta`, `~/.local/share/applications/vanta.desktop`, and `~/.local/share/icons/hicolor/scalable/apps/vanta.svg` yourself. Keep or remove `~/.local/share/vanta` separately depending on whether you want to retain your data.
+On Windows, close VANTA and copy `%APPDATA%\VANTA\vanta.sqlite3` to your backup location. Uninstalling VANTA does not remove the database.
 
 ## Development
 
 ### Requirements
 
-- Fedora Linux with Python 3.9 or newer, GTK 3, WebKitGTK 4.1, and PyGObject for the desktop window.
-- Node.js 20 or newer and npm for the React/Vite frontend and asset build.
-- SQLite is accessed through Python's standard-library `sqlite3` module.
+- Python 3.9+ and SQLite (Python's standard-library `sqlite3`).
+- Node.js 20+ and npm for the frontend build.
+- Linux desktop development: GTK 3, WebKitGTK 4.1, and PyGObject.
+- Windows desktop development: Python 3.10+, Edge WebView2 Runtime, and packages in `requirements-windows.txt`.
 
-### Run the development app
-
-Install the frontend dependencies once (this step needs npm registry access):
+Install npm dependencies once (requires package registry access):
 
 ```bash
 npm ci
 ```
 
-Use two terminals. In the first, start the local SQLite API service:
+Run the API and frontend in separate terminals:
 
 ```bash
+# Terminal 1
 python3 server.py
-```
 
-In the second, start Vite:
-
-```bash
+# Terminal 2
 npm run dev
 ```
 
-Open the Vite URL printed in the terminal, usually `http://127.0.0.1:5173`. Its `/api` requests are proxied to the service at `http://127.0.0.1:8765`.
+Open the Vite URL printed in Terminal 2, usually `http://127.0.0.1:5173`. Vite proxies `/api` to the local service on port 8765.
 
-### Build, test, and launch the desktop window
+### Build and tests
 
 ```bash
 npm run build
 npm test
 python3 -m unittest discover -s tests -v
-python3 desktop.py
 ```
 
-The frontend build is written to `dist/`. The Node tests cover countdown calculations, including expired and invalid dates. The Python tests cover SQLite CRUD/persistence and notification deduplication.
+The production UI is written to `dist/`. Node tests cover countdown boundaries, expiration, and invalid dates. Python tests cover SQLite CRUD/persistence, notification deduplication, and Linux/Windows data-directory selection. Run `python3 desktop.py` on Linux with GTK/WebKitGTK installed, or on Windows with WebView2 and the Windows requirements installed.
 
-### Build an RPM
+### Build the Fedora RPM
 
-Build the frontend first, then create the source archive expected by the RPM spec and build the package:
+Build the frontend first. From the parent directory of this repository:
 
 ```bash
-npm run build
+npm --prefix vanta run build
 mkdir -p "$HOME/rpmbuild/SOURCES"
 tar --exclude='vanta/node_modules' --exclude='vanta/.git' \
   --exclude='vanta/__pycache__' --exclude='vanta/tests/__pycache__' \
   --exclude='vanta/*.rpm' \
   --transform='s,^vanta,vanta-1.0.0,' \
-  -czf "$HOME/rpmbuild/SOURCES/vanta-1.0.0.tar.gz" -C .. vanta
-rpmbuild -bb --define "_topdir $HOME/rpmbuild" packaging/vanta.spec
+  -czf "$HOME/rpmbuild/SOURCES/vanta-1.0.0.tar.gz" vanta
+rpmbuild -bb --define "_topdir $HOME/rpmbuild" vanta/packaging/vanta.spec
 ```
 
-The RPM is written under `~/rpmbuild/RPMS/noarch/`. Update the `Release` and changelog in `packaging/vanta.spec` before producing a subsequent package release.
+The RPM is written under `~/rpmbuild/RPMS/noarch/`. Increment `Release` and add a changelog entry in `packaging/vanta.spec` for each new package build.
 
 ## Technical overview
 
 - **Frontend:** React, TypeScript, Vite, Lucide icons, and CSS.
-- **Desktop shell:** Python GTK 3 application with an embedded WebKitGTK 4.1 view; single-user local desktop process.
-- **Local service:** Python standard-library `http.server`, bound to loopback only.
-- **Persistence:** SQLite via Python `sqlite3`; database location follows `XDG_DATA_HOME`.
-- **Notifications:** Fedora `notify-send`, when available in a graphical session.
-- **Offline operation:** The built frontend is bundled in `dist/`; runtime has no external API or cloud dependency.
-
-Key files:
+- **Desktop shell:** GTK 3/WebKitGTK 4.1 on Linux; pywebview/WebView2 on Windows.
+- **Service:** Python standard-library HTTP server, bound to loopback only.
+- **Persistence:** SQLite through Python `sqlite3`; platform-appropriate per-user data directory.
+- **Notifications:** `notify-send` on Linux; `winotify` toasts on Windows.
+- **Offline runtime:** Compiled frontend is bundled in `dist/`; no web APIs or cloud services are used.
 
 | Path | Purpose |
 | --- | --- |
 | `src/main.tsx` | React application and views |
-| `src/style.css` | Application styling and responsive layout |
-| `src/time.js` | Countdown calculation |
+| `src/style.css` | Responsive interface styling |
+| `src/time.js` | Countdown calculations |
 | `server.py` | SQLite API and reminder scheduler |
-| `desktop.py` | GTK/WebKitGTK desktop window |
-| `dist/` | Compiled offline frontend served by the desktop app |
+| `desktop.py` | Linux GTK and Windows pywebview desktop shells |
+| `dist/` | Compiled frontend served locally |
 | `packaging/vanta.spec` | Fedora RPM recipe |
-| `tests/` | Countdown and service tests |
+| `tests/` | Countdown, persistence, reminder, and data-path tests |
 
-The HTTP API currently provides `GET /api/events`, `POST`/`PUT /api/events`, `DELETE /api/events/<id>`, `GET /api/settings`, and `PATCH /api/settings`. Event timestamps are stored as ISO 8601 instants; the UI converts date/time entry using each event's IANA time zone.
+API routes: `GET /api/events`, `POST`/`PUT /api/events`, `DELETE /api/events/<id>`, `GET /api/settings`, and `PATCH /api/settings`. Event times are stored as ISO 8601 instants and entered/displayed using each event's IANA time zone.

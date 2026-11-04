@@ -7,7 +7,14 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 ROOT=Path(__file__).resolve().parent
-DATA=Path(os.environ.get('XDG_DATA_HOME',Path.home()/'.local/share'))/'vanta'
+def data_directory(system=None,environ=None,home=None):
+    system=system or os.name
+    environ=os.environ if environ is None else environ
+    home=Path.home() if home is None else Path(home)
+    if system == 'nt':
+        return Path(environ.get('APPDATA') or home/'AppData'/'Roaming')/'VANTA'
+    return Path(environ.get('XDG_DATA_HOME') or home/'.local/share')/'vanta'
+DATA=data_directory()
 DATA.mkdir(parents=True,exist_ok=True); DB=DATA/'vanta.sqlite3'
 def connect():
     c=sqlite3.connect(DB,timeout=10);c.row_factory=sqlite3.Row;return c
@@ -62,14 +69,22 @@ class Handler(SimpleHTTPRequestHandler):
         ident=urlparse(self.path).path.removeprefix('/api/events/')
         with db() as c:c.execute('DELETE FROM competitions WHERE id=?',(ident,))
         return self.send_json({'ok':True})
-def notify(title,body,key):
-    command=shutil.which('notify-send')
-    if not command or not os.environ.get('DBUS_SESSION_BUS_ADDRESS'):return
+def notify(title,body,key,system=None):
+    if (system or os.name) == 'nt':
+        try:
+            from winotify import Notification
+        except ImportError:
+            return
+        show=lambda: Notification(app_id='VANTA Competition Tracker',title=title,msg=body).show()
+    else:
+        command=shutil.which('notify-send')
+        if not command or not os.environ.get('DBUS_SESSION_BUS_ADDRESS'):return
+        import subprocess
+        show=lambda: subprocess.Popen([command,'--app-name=VANTA','--icon=dialog-information',title,body],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     with db() as c:
         if c.execute('SELECT 1 FROM notifications WHERE key=?',(key,)).fetchone():return
         c.execute('INSERT INTO notifications VALUES(?,?)',(key,datetime.now(timezone.utc).isoformat()))
-    import subprocess
-    subprocess.Popen([command,'--app-name=VANTA','--icon=dialog-information',title,body],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    show()
 def notification_loop():
     # Check once per minute; keyed by event, type, and reminder window to avoid duplicates.
     while True:

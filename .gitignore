@@ -6,4 +6,5 @@ __pycache__/
 *.sqlite3-wal
 *.log
 /vanta-1.0.0-*.rpm
-!/vanta-1.0.0-4.fc44.noarch.rpm
+!/vanta-1.0.0-5.fc44.noarch.rpm
+.venv/

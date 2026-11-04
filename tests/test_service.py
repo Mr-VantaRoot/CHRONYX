@@ -1,4 +1,5 @@
 import json, os, tempfile, unittest
+import sys, types
 from pathlib import Path
 import sys
 _test_data=tempfile.TemporaryDirectory();os.environ['XDG_DATA_HOME']=_test_data.name
@@ -28,5 +29,14 @@ class ServiceTest(unittest.TestCase):
             server.notify('Reminder','Test','unique-reminder');server.notify('Reminder','Test','unique-reminder')
             self.assertEqual(popen.call_count,1)
         with server.db() as c:self.assertEqual(c.execute('SELECT COUNT(*) FROM notifications WHERE key=?',('unique-reminder',)).fetchone()[0],1)
+    def test_windows_toast_branch_and_deduplication(self):
+        toast=types.SimpleNamespace(show=unittest.mock.Mock())
+        notification=unittest.mock.Mock(return_value=toast)
+        winotify=types.ModuleType('winotify');winotify.Notification=notification
+        with patch.dict(sys.modules,{'winotify':winotify}):
+            server.notify('Windows reminder','Test toast','windows-reminder',system='nt')
+            server.notify('Windows reminder','Test toast','windows-reminder',system='nt')
+        self.assertEqual(notification.call_count,1)
+        toast.show.assert_called_once()
 
 if __name__=='__main__':unittest.main()
