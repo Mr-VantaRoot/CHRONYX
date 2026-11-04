@@ -1,4 +1,4 @@
-# VANTA — Competition Tracker
+# CHRONYX — VANTA Competition Tracker
 
 A privacy-first local competition tracker designed for Linux. Events are stored in SQLite in `~/.local/share/vanta/vanta.sqlite3`. The Python service uses only the standard library; desktop notices use Fedora's `notify-send` when a session notification bus is available.
 
