@@ -1,6 +1,6 @@
 Name:           vanta
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Local competition tracker
 License:        MIT
 BuildArch:      noarch
@@ -34,6 +34,9 @@ cp public/vanta.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/vanta.sv
 %{_datadir}/icons/hicolor/scalable/apps/vanta.svg
 
 %changelog
+* Thu Nov 05 2026 VANTA Team <local@localhost> - 1.0.0-6
+- Add persistent device-local profile pictures
+
 * Thu Nov 05 2026 VANTA Team <local@localhost> - 1.0.0-5
 - Add Windows WebView2 launcher and per-user data location
 - Add Windows toast notifications and cross-platform path tests

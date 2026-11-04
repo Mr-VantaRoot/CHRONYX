@@ -11,6 +11,7 @@ VANTA is an offline-first desktop app for tracking competitions, registration de
 - Search and filter by category, status, and priority; sort by start date or registration deadline.
 - Fedora desktop reminders 7 days, 3 days, 1 day, or 1 hour before starts and registration deadlines; supports a custom hour offset.
 - JSON backup/import, CSV export, and dark/light themes.
+- A device-local profile picture shown in the workspace sidebar.
 
 ## Platform support and test status
 
@@ -24,16 +25,16 @@ VANTA's React UI, countdown code, and SQLite service are portable. The native wi
 
 ## Install on Fedora
 
-The repository includes `vanta-1.0.0-5.fc44.noarch.rpm`:
+The repository includes `vanta-1.0.0-6.fc44.noarch.rpm`:
 
 ```bash
-sudo dnf install ./vanta-1.0.0-5.fc44.noarch.rpm
+sudo dnf install ./vanta-1.0.0-6.fc44.noarch.rpm
 ```
 
 If the machine is offline and GTK 3, WebKitGTK 4.1, Python, and PyGObject are already installed, skip repository refresh:
 
 ```bash
-sudo dnf install --disablerepo='*' ./vanta-1.0.0-5.fc44.noarch.rpm
+sudo dnf install --disablerepo='*' ./vanta-1.0.0-6.fc44.noarch.rpm
 ```
 
 Launch **VANTA Competition Tracker** from the applications menu or run `vanta` in a terminal.
@@ -80,7 +81,7 @@ If the WebView2 Runtime is missing, install Microsoft's [Evergreen WebView2 Runt
 3. Add optional category, organiser, description, end date, registration deadline, website, registration URL, status, priority, and personal notes.
 4. Use the dashboard to watch the nearest start countdown. **All Competitions** provides search, filters, sorting, and event actions.
 5. Use **Calendar** for Month, Week, Day, or Agenda. Select an entry to open its details.
-6. In **Settings**, change the theme, configure reminders, export a JSON or CSV file, or import a JSON backup.
+6. In **Settings**, choose a profile picture, change the theme, configure reminders, export a JSON or CSV file, or import a JSON backup. The profile picture is saved locally on that device and is not included in competition exports.
 
 To receive reminders, leave VANTA running in your desktop session. The scheduler checks once a minute and stores sent reminder keys in SQLite to avoid sending the same reminder twice. Linux needs a session notification bus and `notify-send`; Windows needs working Windows notifications. Completed and cancelled events do not generate reminders.
 
