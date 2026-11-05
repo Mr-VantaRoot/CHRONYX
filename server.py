@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -20,9 +21,15 @@ from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).resolve().parent
+SERVICE_PORT = 8765
 MAX_REQUEST_BYTES = 256 * 1024
 MAX_IMPORT_BYTES = 4 * 1024 * 1024
 NOTIFICATION_LEASE = timedelta(minutes=2)
+LAST_RUN_KEY = 'scheduler_last_run'
+NOTIFICATION_KEY = re.compile(
+    r'^(?P<id>.+):(?P<field>start|deadline):(?P<tag>\d+[dh])'
+    r'(?::(?P<target>\d{4}-\d{2}-\d{2}T.+))?$'
+)
 ALLOWED_CATEGORIES = {
     'CTF', 'Hackathon', 'AI / ML', 'Robotics', 'Programming',
     'Scholarship', 'Technology', 'Other',
@@ -256,17 +263,26 @@ def export_csv(items):
     return output.getvalue()
 
 
-def _trusted_origin(origin):
+def _trusted_origin(origin, port=SERVICE_PORT):
+    """Trust only this service's own loopback origin (or no Origin at all)."""
     if not origin:
         return True  # Desktop shell and local CLI clients may omit Origin.
     try:
         parsed = urlsplit(origin)
-        hostname = parsed.hostname
-        return parsed.scheme in ('http', 'https') and bool(hostname) and (
-            hostname.lower() == 'localhost' or ipaddress.ip_address(hostname).is_loopback
+        return (
+            parsed.scheme == 'http'
+            and parsed.hostname in ('127.0.0.1', 'localhost')
+            and parsed.port == port
+            and not parsed.username and not parsed.password
+            and parsed.path in ('', '/') and not parsed.query and not parsed.fragment
         )
     except ValueError:
         return False
+
+
+def _request_port(handler):
+    server_address = getattr(getattr(handler, 'server', None), 'server_address', None)
+    return server_address[1] if server_address else SERVICE_PORT
 
 
 def frontend_file_path(request_path, root=None):
@@ -309,7 +325,7 @@ class Handler(SimpleHTTPRequestHandler):
         if getattr(self, 'close_connection', False):
             self.send_header('Connection', 'close')
         origin = self.headers.get('Origin')
-        if origin and _trusted_origin(origin):
+        if origin and _trusted_origin(origin, _request_port(self)):
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
         self.send_header('X-Content-Type-Options', 'nosniff')
@@ -336,7 +352,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _check_host(self):
         value = self.headers.get('Host', '')
-        port = getattr(getattr(self, 'server', None), 'server_address', ('127.0.0.1', 8765))[1]
+        port = _request_port(self)
         try:
             host = urlsplit(f'//{value}')
             valid = (
@@ -355,7 +371,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _check_origin(self):
         origin = self.headers.get('Origin')
-        if not _trusted_origin(origin):
+        if not _trusted_origin(origin, _request_port(self)):
             self.close_connection = True
             self.send_json({'error': 'Requests must come from the local application'}, 403)
             return False
@@ -740,10 +756,51 @@ def _reminder_preferences():
         return {}
 
 
+def format_remaining(seconds):
+    """Describe an actual time-to-go, rather than the reminder window's name."""
+    seconds = max(int(seconds), 0)
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes = remainder // 60
+    if days:
+        return f'{days}d {hours}h' if hours else f'{days}d'
+    if hours:
+        return f'{hours}h {minutes}m' if minutes else f'{hours}h'
+    return f'{max(minutes, 1)}m'
+
+
+def _read_last_run():
+    with db() as connection:
+        row = connection.execute('SELECT value FROM settings WHERE key=?', (LAST_RUN_KEY,)).fetchone()
+    if not row:
+        return None
+    try:
+        value = datetime.fromisoformat(row['value'])
+    except (TypeError, ValueError):
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def _write_last_run(now):
+    with db() as connection:
+        connection.execute(
+            'INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)',
+            (LAST_RUN_KEY, now.astimezone(timezone.utc).isoformat(timespec='seconds')),
+        )
+
+
 def run_reminder_check(now=None):
-    """Deliver one active or missed reminder per event field, and retry failures."""
+    """Deliver due reminders, one catch-up after downtime, and retry failures.
+
+    A reminder window is "new" only if it opened after the previous scheduler
+    run. Events created, imported or edited inside an already-open window are
+    therefore silent, while a window that opened while the app was closed gets
+    exactly one catch-up (the tightest one) when the app returns.
+    """
     now = now or datetime.now(timezone.utc)
     now = now.astimezone(timezone.utc)
+    last_run = _read_last_run()
+    baseline = last_run if last_run and last_run <= now else now - timedelta(seconds=90)
     prefs = _reminder_preferences()
     windows = [(604800, '7d'), (259200, '3d'), (86400, '1d'), (3600, '1h')]
     custom = prefs.get('customHours', 0)
@@ -773,26 +830,28 @@ def run_reminder_check(now=None):
             delta = (target - now).total_seconds()
             if delta <= 0:
                 continue
-            enabled = [
+            opened = [
                 (seconds, tag) for seconds, tag in windows
                 if prefs.get(tag, tag == f'{custom}h') and delta <= seconds
             ]
-            if not enabled:
+            if not opened:
                 continue
-            # The smallest elapsed window is the latest reminder point missed.
-            # Selecting it first prevents a later scheduler tick from sending
-            # a second catch-up for an older window after this one was delivered.
-            seconds, tag = min(enabled, key=lambda item: item[0])
+            # The tightest opened window is the latest reminder point reached;
+            # choosing it prevents a second catch-up for an older window.
+            seconds, tag = min(opened, key=lambda item: item[0])
             key = notification_key(event['id'], field, tag, target)
             state = persisted_notifications.get(key)
             if state and state['status'] == 'delivered':
                 continue
+            if state is None and target - timedelta(seconds=seconds) <= baseline:
+                continue  # Window opened before the last run: nothing was missed.
             try:
                 event_time = target.astimezone(ZoneInfo(event['timezone']))
             except (ZoneInfoNotFoundError, ValueError):
                 event_time = target
             display_time = event_time.strftime('%a %d %b, %H:%M %Z')
-            notify(f"{event['name']} {label}", f'{tag} remaining · {display_time}', key, now=now)
+            notify(f"{event['name']} {label}", f'{format_remaining(delta)} remaining · {display_time}', key, now=now)
+    _write_last_run(now)
 
 
 def prune_notifications(now=None):
@@ -807,16 +866,14 @@ def prune_notifications(now=None):
         delivered = connection.execute("SELECT key FROM notifications WHERE status='delivered'").fetchall()
         remove = []
         for row in delivered:
-            parts = row['key'].split(':')
-            event_id = parts[0] if parts else ''
-            event = competitions.get(event_id)
+            parsed = NOTIFICATION_KEY.match(row['key'])
+            if not parsed:
+                continue  # Unknown key shape: keep it rather than risk a repeat reminder.
+            event = competitions.get(parsed['id'])
             if not event:
                 remove.append(row['key'])
                 continue
-            field = parts[1] if len(parts) > 1 else ''
-            if field not in ('start', 'deadline'):
-                continue
-            target_text = ':'.join(parts[3:]) if len(parts) > 3 else event[field]
+            target_text = parsed['target'] or event[parsed['field']]
             if not target_text:
                 continue
             try:
@@ -854,5 +911,5 @@ class LocalHTTPServer(ThreadingHTTPServer):
 
 if __name__ == '__main__':
     threading.Thread(target=notification_loop, daemon=True).start()
-    print(f'CHRONYX local service · SQLite: {DB} · http://127.0.0.1:8765', flush=True)
-    LocalHTTPServer(('127.0.0.1', 8765), Handler).serve_forever()
+    print(f'CHRONYX local service · SQLite: {DB} · http://127.0.0.1:{SERVICE_PORT}', flush=True)
+    LocalHTTPServer(('127.0.0.1', SERVICE_PORT), Handler).serve_forever()

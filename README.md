@@ -118,7 +118,7 @@ If the WebView2 Runtime is missing, install Microsoft's [Evergreen WebView2 Runt
 5. Use **Calendar** for Month, Week, Day, or Agenda. Select an entry to open its details.
 6. In **Settings**, choose a profile picture, change the theme, configure reminders, export a JSON or CSV file, or import a JSON backup. The profile picture is saved locally on that device and is not included in competition exports.
 
-To receive reminders, leave VANTA running in your desktop session. The scheduler checks once a minute and stores sent reminder keys in SQLite to avoid sending the same reminder twice. Linux needs a session notification bus and `notify-send`; Windows needs working Windows notifications. Completed and cancelled events do not generate reminders.
+To receive reminders, leave VANTA running in your desktop session. The scheduler checks once a minute and stores sent reminder keys in SQLite to avoid sending the same reminder twice. If VANTA was closed when a reminder window opened, it sends one catch-up for the tightest missed window when it next runs. Adding, importing, or editing an event that is already inside a reminder window does not trigger an immediate notification. Notifications show the actual time remaining. Linux needs a session notification bus and `notify-send`; Windows needs working Windows notifications. Completed and cancelled events do not generate reminders.
 
 ## Data, backups, and privacy
 
@@ -129,11 +129,13 @@ Linux:   ${XDG_DATA_HOME:-$HOME/.local/share}/vanta/vanta.sqlite3
 Windows: %APPDATA%\VANTA\vanta.sqlite3
 ```
 
-SQLite stores competition records, reminder preferences, and notification delivery/retry state. Linux uses `${XDG_DATA_HOME:-$HOME/.local/share}/vanta/vanta.sqlite3`; Windows uses `%APPDATA%\VANTA\vanta.sqlite3`. Profile pictures and the offline write queue are held in the embedded webview's per-user browser storage, not in SQLite or competition JSON backups. VANTA's local API binds only to `127.0.0.1:8765`; it does not listen on LAN interfaces. API writes accept requests without an Origin header for the native desktop shell and otherwise require a loopback Origin. No cloud account or network access is needed after installation.
+SQLite stores competition records, reminder preferences, and notification delivery/retry state. Linux uses `${XDG_DATA_HOME:-$HOME/.local/share}/vanta/vanta.sqlite3`; Windows uses `%APPDATA%\VANTA\vanta.sqlite3`. Profile pictures and the offline write queue are held in the embedded webview's per-user browser storage, not in SQLite or competition JSON backups. VANTA's local API binds only to `127.0.0.1:8765`; it does not listen on LAN interfaces. Every request must carry this service's own Host, and any Origin header must be exactly `http://127.0.0.1:8765` or `http://localhost:8765`; requests without an Origin are accepted for the native desktop shell. No cloud account or network access is needed after installation.
 
-Use **Settings → Backup JSON** for a portable event backup and **Settings → Import JSON** to import/merge events. CSV export is for spreadsheets; it is not an import format. Back up the webview profile separately if you want to preserve the profile picture and queued offline edits. To back up the entire SQLite database, close VANTA and run on Linux:
+Use **Settings → Backup JSON** for a portable event backup and **Settings → Import JSON** to import/merge events. CSV export is for spreadsheets; it is not an import format. Back up the webview profile separately if you want to preserve the profile picture and queued offline edits.
 
-JSON and CSV downloads use the local API's attachment endpoints as a fallback that does not depend on browser blob support. JSON import validates every row, converts offset-free wall times in the event timezone, imports valid rows in one database transaction, and shows the exact invalid rows and reasons. CSV cells beginning with spreadsheet formula characters are prefixed to prevent formula execution when opened in spreadsheet software. Native save-dialog behavior still needs manual verification on each desktop shell.
+JSON and CSV downloads use the local API's attachment endpoints. On Linux the desktop shell saves them to your Downloads folder without overwriting existing files and confirms the saved path in a dialog; on Windows the shell enables pywebview downloads so WebView2 shows its own save flow. Both still need manual verification on a real desktop. JSON import validates every row, converts offset-free wall times in the event timezone, imports valid rows in one database transaction, and shows the exact invalid rows and reasons. CSV cells beginning with spreadsheet formula characters are prefixed to prevent formula execution when opened in spreadsheet software.
+
+To back up the entire SQLite database, close VANTA and run on Linux:
 
 ```bash
 sqlite3 "${XDG_DATA_HOME:-$HOME/.local/share}/vanta/vanta.sqlite3" \
@@ -167,7 +169,7 @@ python3 server.py
 npm run dev
 ```
 
-Open the Vite URL printed in Terminal 2, usually `http://127.0.0.1:5173`. Vite proxies `/api` to the local service on port 8765.
+Open the Vite URL printed in Terminal 2, usually `http://127.0.0.1:5173`. Vite proxies `/api` to the local service on port 8765 and presents the service's own Host and Origin, which the API requires.
 
 ### Build and tests
 
@@ -198,7 +200,7 @@ tar -C "$PROJECT_PARENT" --exclude='node_modules' --exclude='.git' \
 rpmbuild -bb --define "_topdir $HOME/rpmbuild" packaging/vanta.spec
 ```
 
-The RPM is written under `~/rpmbuild/RPMS/noarch/`. Increment `Release` and add a changelog entry in `packaging/vanta.spec` for each package build. The Fedora package requires `libnotify`, which provides `notify-send` on this Fedora build host.
+The RPM is written under `~/rpmbuild/RPMS/noarch/`. To publish it, push a tag that starts with `v` (for example `git tag v1.0.0-8 && git push origin v1.0.0-8`); the release workflow runs the tests, builds the RPM, and attaches it with a `SHA256SUMS` file. The install commands above work only after a release exists. Increment `Release` and add a changelog entry in `packaging/vanta.spec` for each package build. The Fedora package requires `libnotify`, which provides `notify-send` on this Fedora build host.
 
 ## Troubleshooting
 
@@ -210,7 +212,7 @@ The RPM is written under `~/rpmbuild/RPMS/noarch/`. Increment `Release` and add 
 
 ## Security assumptions
 
-CHRONYX is a single-user desktop application. The local API binds to IPv4 loopback and validates the Host header on every request and the Origin header on API requests that include one. This protects reads and writes against DNS rebinding; native-shell requests without an Origin remain allowed. The server uses parameterized SQL, validates write payloads, and limits JSON request size. Authentication is intentionally absent because the service is only for the local desktop application. Any process running as the same OS user can access the database and local profile data. Do not expose port 8765 through a proxy or bind it to a public interface.
+CHRONYX is a single-user desktop application. The local API binds to IPv4 loopback and validates the Host header on every request and requires any Origin header on API requests to be exactly this service's own loopback origin (`http://127.0.0.1:8765` or `http://localhost:8765`). This protects reads and writes against DNS rebinding and against pages served from other localhost ports; native-shell requests without an Origin remain allowed. The server uses parameterized SQL, validates write payloads, and limits JSON request size. Authentication is intentionally absent because the service is only for the local desktop application. Any process running as the same OS user can access the database and local profile data. Do not expose port 8765 through a proxy or bind it to a public interface.
 
 ## GitHub repository metadata
 
@@ -233,13 +235,13 @@ GitHub Actions runs the test/build/type-check suite on Ubuntu 24.04 and Windows 
 
 | Path | Purpose |
 | --- | --- |
-| `src/main.tsx` | React application and views |
+| `src/main.tsx`, `src/App.tsx` | React entry point and application shell; feature components live beside them in `src/` |
 | `src/style.css` | Responsive interface styling |
-| `src/time.js` | Countdown calculations |
+| `src/time.js`, `src/*-model.js` | Countdown, calendar, filter, and import/export logic (unit-tested) |
 | `server.py` | SQLite API and reminder scheduler |
 | `desktop.py` | Linux GTK and Windows pywebview desktop shells |
 | `dist/` | Compiled frontend served locally |
 | `packaging/vanta.spec` | Fedora RPM recipe |
 | `tests/` | Countdown, persistence, reminder, and data-path tests |
 
-API routes: `GET /api/events`, `POST`/`PUT /api/events`, `DELETE /api/events/<id>`, `GET /api/settings`, and `PATCH /api/settings`. Event times are stored as ISO 8601 instants and entered/displayed using each event's IANA time zone.
+API routes: `GET /api/events`, `POST`/`PUT /api/events`, `POST /api/events/import`, `DELETE /api/events/<id>`, `GET /api/export.json`, `GET /api/export.csv`, `POST /api/open` (http/https links only), `GET /api/settings`, and `PATCH /api/settings`. Event times are stored as ISO 8601 instants and entered/displayed using each event's IANA time zone.

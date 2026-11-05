@@ -227,6 +227,7 @@ class ServiceTest(unittest.TestCase):
         self.add_event(event_payload((now + timedelta(days=2)).isoformat()))
         with server.db() as connection:
             connection.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps({'7d': True, '3d': True, '1d': True, '1h': True}), 'reminders'))
+        server._write_last_run(now - timedelta(days=2))  # The app was closed when 7d and 3d opened.
         with patch('server.subprocess.run') as run, patch('server.shutil.which', return_value='/usr/bin/notify-send'), patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': 'test'}):
             server.run_reminder_check(now)
             server.run_reminder_check(now + timedelta(seconds=30))
@@ -234,6 +235,115 @@ class ServiceTest(unittest.TestCase):
         with server.db() as connection:
             key = connection.execute('SELECT key FROM notifications WHERE status=?', ('delivered',)).fetchone()['key']
         self.assertIn(':start:3d:', key)
+
+    def test_event_created_inside_an_open_window_is_silent(self):
+        now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        self.add_event(event_payload((now + timedelta(days=2)).isoformat()))
+        server._write_last_run(now - timedelta(seconds=60))
+        with patch('server.notify') as notify:
+            server.run_reminder_check(now)
+            server.run_reminder_check(now + timedelta(seconds=60))
+        notify.assert_not_called()
+
+    def test_first_run_without_history_does_not_replay_old_windows(self):
+        now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        self.add_event(event_payload((now + timedelta(days=2)).isoformat()))
+        with patch('server.notify') as notify:
+            server.run_reminder_check(now)
+        notify.assert_not_called()
+
+    def test_window_opening_after_the_last_run_notifies_with_real_time_left(self):
+        now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        self.add_event(event_payload((now + timedelta(days=1, seconds=-30)).isoformat()))
+        server._write_last_run(now - timedelta(seconds=60))
+        with patch('server.notify') as notify:
+            server.run_reminder_check(now)
+        notify.assert_called_once()
+        self.assertTrue(notify.call_args.args[1].startswith('23h 59m remaining'))
+
+    def test_catch_up_reports_actual_time_left_not_the_window_name(self):
+        now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        self.add_event(event_payload((now + timedelta(days=2)).isoformat()))
+        server._write_last_run(now - timedelta(days=2))
+        with patch('server.notify') as notify:
+            server.run_reminder_check(now)
+        self.assertTrue(notify.call_args.args[1].startswith('2d remaining'))
+        self.assertIn(':3d:', notify.call_args.args[2])
+
+    def test_scheduler_records_its_last_run(self):
+        now = datetime(2030, 1, 1, 12, tzinfo=timezone.utc)
+        self.assertIsNone(server._read_last_run())
+        server.run_reminder_check(now)
+        self.assertEqual(server._read_last_run(), now)
+
+    def test_failed_delivery_is_still_retried_after_its_window_opened_earlier(self):
+        now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        target = now + timedelta(days=2)
+        self.add_event(event_payload(target.isoformat()))
+        key = server.notification_key('event-1', 'start', '3d', target)
+        with server.db() as connection:
+            connection.execute(
+                "INSERT INTO notifications(key,sent_at,status,attempts,claimed_at,retry_after) VALUES(?,?,'failed',1,?,?)",
+                (key, (now - timedelta(days=1)).isoformat(), (now - timedelta(days=1)).isoformat(), (now - timedelta(hours=1)).isoformat()),
+            )
+        server._write_last_run(now - timedelta(seconds=60))
+        with patch('server.notify') as notify:
+            server.run_reminder_check(now)
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.args[2], key)
+
+    def test_format_remaining_uses_the_two_largest_units(self):
+        self.assertEqual(server.format_remaining(2 * 86400), '2d')
+        self.assertEqual(server.format_remaining(2 * 86400 + 3 * 3600 + 59), '2d 3h')
+        self.assertEqual(server.format_remaining(3600), '1h')
+        self.assertEqual(server.format_remaining(5400), '1h 30m')
+        self.assertEqual(server.format_remaining(20), '1m')
+
+    def test_origin_must_match_this_services_exact_loopback_origin(self):
+        for trusted in (None, '', 'http://127.0.0.1:8765', 'http://localhost:8765', 'http://localhost:8765/'):
+            self.assertTrue(server._trusted_origin(trusted), trusted)
+        for rejected in (
+            'http://localhost:9999', 'http://127.0.0.1:5173', 'http://127.0.0.1', 'https://127.0.0.1:8765',
+            'http://127.0.0.1.evil.test:8765', 'http://user@127.0.0.1:8765', 'http://127.0.0.1:8765/x',
+            'null', 'http://[::1]:8765', 'http://localhost:notaport',
+        ):
+            self.assertFalse(server._trusted_origin(rejected), rejected)
+        self.assertTrue(server._trusted_origin('http://127.0.0.1:12345', 12345))
+        self.assertFalse(server._trusted_origin('http://127.0.0.1:8765', 12345))
+
+    def test_cors_header_is_only_sent_for_the_exact_service_origin(self):
+        class HeaderRecorder(server.Handler):
+            def __init__(self, origin):
+                self.headers = {'Origin': origin}
+                self.path = '/api/events'
+                self.close_connection = False
+                self.request_version = 'HTTP/1.1'
+                self.captured = {}
+                self._headers_buffer = []
+                self.wfile = io.BytesIO()
+
+            def send_header(self, key, value):
+                self.captured[key] = value
+                self._headers_buffer.append(f'{key}: {value}\r\n'.encode())
+
+        same = HeaderRecorder('http://127.0.0.1:8765')
+        server.Handler.end_headers(same)
+        self.assertEqual(same.captured['Access-Control-Allow-Origin'], 'http://127.0.0.1:8765')
+        other = HeaderRecorder('http://localhost:9999')
+        server.Handler.end_headers(other)
+        self.assertNotIn('Access-Control-Allow-Origin', other.captured)
+
+    def test_prune_supports_event_ids_that_contain_colons(self):
+        now = datetime(2030, 2, 1, tzinfo=timezone.utc)
+        future = now + timedelta(days=300)
+        self.add_event({**event_payload(future.isoformat()), 'id': 'ctf:2030:finals'})
+        key = server.notification_key('ctf:2030:finals', 'start', '1d', future)
+        with server.db() as connection:
+            connection.execute("INSERT INTO notifications(key,sent_at,status) VALUES(?,?,'delivered')", (key, now.isoformat()))
+        self.assertEqual(server.prune_notifications(now), 0)
+        with server.db() as connection:
+            connection.execute('DELETE FROM competitions WHERE id=?', ('ctf:2030:finals',))
+        self.assertEqual(server.prune_notifications(now), 1)
 
     def test_notification_pruning_removes_orphans_and_delivered_targets_over_30_days(self):
         now = datetime(2030, 2, 1, tzinfo=timezone.utc)

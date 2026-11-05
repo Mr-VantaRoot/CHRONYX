@@ -2,6 +2,15 @@
 
 Notable user-facing changes are recorded here.
 
+## Unreleased
+
+- Catch up only on reminder windows that opened while the app was closed; events added, imported, or edited inside an open window no longer fire an instant toast.
+- Show the actual time remaining in reminder notifications instead of the window name.
+- Require API requests to come from this service's exact loopback origin, not any localhost port; the Vite dev proxy now presents that origin.
+- Save JSON/CSV exports to the Downloads folder in the Linux shell (no overwrite, with a confirmation dialog) and enable pywebview downloads on Windows.
+- Fix notification pruning for event IDs that contain colons.
+- Run the test suite before building a tagged release.
+
 ## 1.0.0-8 — 2026-11-05
 
 - Deliver the RPM through GitHub Releases with SHA-256 checksums instead of committing package binaries.

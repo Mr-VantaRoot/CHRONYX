@@ -3,9 +3,11 @@
 import ctypes
 import os
 import json
+import re
 import sys
 import threading
 import time
+from pathlib import Path
 from urllib.request import urlopen
 
 from server import Handler, LocalHTTPServer, notification_loop
@@ -40,6 +42,34 @@ def acquire_windows_instance():
     _windows_mutex = (kernel32, handle)
     return True
 
+def safe_download_name(name):
+    """Reduce a server- or page-suggested filename to a safe basename."""
+    base = os.path.basename(str(name or '').replace('\\', '/')).strip().strip('.')
+    base = re.sub(r'[\x00-\x1f<>:"|?*]', '_', base)
+    return base or 'chronyx-export'
+
+
+def default_download_directory(special_dir=None, home=None):
+    """Prefer the desktop's Downloads folder, else ~/Downloads."""
+    if special_dir:
+        return Path(special_dir)
+    return Path(home or Path.home()) / 'Downloads'
+
+
+def unique_download_path(directory, suggested):
+    """Return a non-existing path in directory without overwriting a file."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    name = safe_download_name(suggested)
+    stem, suffix = Path(name).stem, Path(name).suffix
+    candidate = directory / name
+    counter = 1
+    while candidate.exists():
+        candidate = directory / f'{stem} ({counter}){suffix}'
+        counter += 1
+    return candidate
+
+
 def start_or_attach_service():
     """Start one local API/scheduler, or attach to an existing CHRONYX one."""
     try:
@@ -73,6 +103,10 @@ def run_windows():
     # pywebview uses the installed Microsoft Edge WebView2 runtime on Windows.
     try:
         import webview
+        # Backup JSON/CSV use attachment downloads, which pywebview blocks by default.
+        settings = getattr(webview, 'settings', None)
+        if isinstance(settings, dict):
+            settings['ALLOW_DOWNLOADS'] = True
         webview.create_window(
             'VANTA — Competition Tracker',
             f'http://127.0.0.1:8765/?v={time.time_ns()}',
@@ -94,12 +128,43 @@ def run_linux():
         ) from error
     require_version('Gtk', '3.0')
     require_version('WebKit2', '4.1')
-    from gi.repository import Gtk, WebKit2
+    from gi.repository import GLib, Gtk, WebKit2
 
     class Vanta(Gtk.Application):
         def __init__(self):
             super().__init__(application_id='io.vanta.CompetitionTracker')
             self.window = None
+            self.downloads = {}
+
+        def show_message(self, title, detail):
+            dialog = Gtk.MessageDialog(
+                transient_for=self.window, modal=True, message_type=Gtk.MessageType.INFO,
+                buttons=Gtk.ButtonsType.OK, text=title,
+            )
+            dialog.format_secondary_text(detail)
+            dialog.connect('response', lambda widget, _response: widget.destroy())
+            dialog.show()
+
+        def on_download_started(self, _context, download):
+            download.connect('decide-destination', self.on_decide_destination)
+            download.connect('failed', self.on_download_failed)
+            download.connect('finished', self.on_download_finished)
+
+        def on_decide_destination(self, download, suggested):
+            directory = default_download_directory(GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD))
+            path = unique_download_path(directory, suggested)
+            self.downloads[download] = path
+            download.set_destination(path.as_uri())
+            return True
+
+        def on_download_failed(self, download, error):
+            self.downloads[download] = None  # 'finished' also fires after a failure.
+            self.show_message('Export failed', str(getattr(error, 'message', error)))
+
+        def on_download_finished(self, download):
+            path = self.downloads.pop(download, None)
+            if path:
+                self.show_message('Export saved', str(path))
 
         def do_activate(self):
             if self.window:
@@ -112,6 +177,7 @@ def run_linux():
             view = WebKit2.WebView()
             view.set_vexpand(True)
             view.set_hexpand(True)
+            view.get_context().connect('download-started', self.on_download_started)
             view.load_uri(f'http://127.0.0.1:8765/?v={time.time_ns()}')
             self.window.add(view)
             self.window.show_all()
