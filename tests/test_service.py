@@ -210,6 +210,51 @@ class ServiceTest(unittest.TestCase):
             server.run_reminder_check(target - timedelta(days=1) + timedelta(seconds=30))
         self.assertIn('03:00 EAT', notify.call_args.args[1])
 
+    def test_missed_reminder_sends_only_the_tightest_catch_up_and_deduplicates(self):
+        now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        self.add_event(event_payload((now + timedelta(days=2)).isoformat()))
+        with server.db() as connection:
+            connection.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps({'7d': True, '3d': True, '1d': True, '1h': True}), 'reminders'))
+        with patch('server.subprocess.run') as run, patch('server.shutil.which', return_value='/usr/bin/notify-send'), patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': 'test'}):
+            server.run_reminder_check(now)
+            server.run_reminder_check(now + timedelta(seconds=30))
+        self.assertEqual(run.call_count, 1)
+        with server.db() as connection:
+            key = connection.execute('SELECT key FROM notifications WHERE status=?', ('delivered',)).fetchone()['key']
+        self.assertIn(':start:3d:', key)
+
+    def test_notification_pruning_removes_orphans_and_delivered_targets_over_30_days(self):
+        now = datetime(2030, 2, 1, tzinfo=timezone.utc)
+        old_target = now - timedelta(days=31)
+        recent_target = now - timedelta(days=29)
+        self.add_event(event_payload(old_target.isoformat()))
+        with server.db() as connection:
+            for target, key, status in (
+                (old_target, server.notification_key('event-1', 'start', '7d', old_target), 'delivered'),
+                (recent_target, server.notification_key('event-1', 'start', '3d', recent_target), 'delivered'),
+                (old_target, server.notification_key('missing-event', 'start', '7d', old_target), 'delivered'),
+                (old_target, server.notification_key('missing-event', 'start', '1d', old_target), 'failed'),
+            ):
+                connection.execute('INSERT INTO notifications(key,sent_at,status) VALUES(?,?,?)', (key, now.isoformat(), status))
+        self.assertEqual(server.prune_notifications(now), 2)
+        with server.db() as connection:
+            rows = {row['status'] for row in connection.execute('SELECT status FROM notifications')}
+            keys = {row['key'] for row in connection.execute('SELECT key FROM notifications')}
+        self.assertEqual(len(keys), 2)
+        self.assertIn('failed', rows)
+        self.assertIn(server.notification_key('event-1', 'start', '3d', recent_target), keys)
+
+    def test_notification_loop_prunes_at_startup_and_daily(self):
+        class StopLoop(Exception):
+            pass
+        with patch('server.time.monotonic', side_effect=[0, 1, 86401, 86402]), \
+             patch('server.time.sleep', side_effect=[None, StopLoop]), \
+             patch('server.prune_notifications') as prune, \
+             patch('server.run_reminder_check'):
+            with self.assertRaises(StopLoop):
+                server.notification_loop()
+        self.assertEqual(prune.call_count, 2)
+
     def test_api_validates_event_and_origin_and_delete_errors(self):
         def handler(body, origin=None, path='/api/events'):
             request = server.Handler.__new__(server.Handler)

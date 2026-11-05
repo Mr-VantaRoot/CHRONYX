@@ -626,7 +626,7 @@ def _reminder_preferences():
 
 
 def run_reminder_check(now=None):
-    """Check the current reminder window; also retry previously failed jobs."""
+    """Deliver one active or missed reminder per event field, and retry failures."""
     now = now or datetime.now(timezone.utc)
     now = now.astimezone(timezone.utc)
     prefs = _reminder_preferences()
@@ -656,24 +656,75 @@ def run_reminder_check(now=None):
             except (TypeError, ValueError):
                 continue
             delta = (target - now).total_seconds()
-            for seconds, tag in windows:
-                if not prefs.get(tag, tag == f'{custom}h') or delta <= 0 or delta > seconds:
-                    continue
-                key = notification_key(event['id'], field, tag, target)
-                state = persisted_notifications.get(key)
-                in_delivery_window = seconds - 90 < delta <= seconds
-                retry_ready = state and state['status'] in ('failed', 'pending')
-                if in_delivery_window or retry_ready:
-                    try:
-                        event_time = target.astimezone(ZoneInfo(event['timezone']))
-                    except (ZoneInfoNotFoundError, ValueError):
-                        event_time = target
-                    display_time = event_time.strftime('%a %d %b, %H:%M %Z')
-                    notify(f"{event['name']} {label}", f'{tag} remaining · {display_time}', key, now=now)
+            if delta <= 0:
+                continue
+            enabled = [
+                (seconds, tag) for seconds, tag in windows
+                if prefs.get(tag, tag == f'{custom}h') and delta <= seconds
+            ]
+            if not enabled:
+                continue
+            # The smallest elapsed window is the latest reminder point missed.
+            # Selecting it first prevents a later scheduler tick from sending
+            # a second catch-up for an older window after this one was delivered.
+            seconds, tag = min(enabled, key=lambda item: item[0])
+            key = notification_key(event['id'], field, tag, target)
+            state = persisted_notifications.get(key)
+            if state and state['status'] == 'delivered':
+                continue
+            try:
+                event_time = target.astimezone(ZoneInfo(event['timezone']))
+            except (ZoneInfoNotFoundError, ValueError):
+                event_time = target
+            display_time = event_time.strftime('%a %d %b, %H:%M %Z')
+            notify(f"{event['name']} {label}", f'{tag} remaining · {display_time}', key, now=now)
+
+
+def prune_notifications(now=None):
+    """Remove delivered reminder history that can no longer suppress a reminder."""
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cutoff = now - timedelta(days=30)
+    with db() as connection:
+        competitions = {
+            row['id']: {'start': row['start'], 'deadline': row['deadline']}
+            for row in connection.execute('SELECT id,start,deadline FROM competitions')
+        }
+        delivered = connection.execute("SELECT key FROM notifications WHERE status='delivered'").fetchall()
+        remove = []
+        for row in delivered:
+            parts = row['key'].split(':')
+            event_id = parts[0] if parts else ''
+            event = competitions.get(event_id)
+            if not event:
+                remove.append(row['key'])
+                continue
+            field = parts[1] if len(parts) > 1 else ''
+            if field not in ('start', 'deadline'):
+                continue
+            target_text = ':'.join(parts[3:]) if len(parts) > 3 else event[field]
+            if not target_text:
+                continue
+            try:
+                target = datetime.fromisoformat(target_text.replace('Z', '+00:00'))
+                target = target.replace(tzinfo=timezone.utc) if target.tzinfo is None else target.astimezone(timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            if target < cutoff:
+                remove.append(row['key'])
+        if remove:
+            connection.executemany('DELETE FROM notifications WHERE key=? AND status=\'delivered\'', ((key,) for key in remove))
+    return len(remove)
 
 
 def notification_loop():
+    next_prune = 0.0
     while True:
+        if time.monotonic() >= next_prune:
+            try:
+                prune_notifications()
+            except Exception as error:
+                print(f'CHRONYX notification cleanup: {error}', flush=True)
+            next_prune = time.monotonic() + 24 * 60 * 60
         try:
             run_reminder_check()
         except Exception as error:
