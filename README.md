@@ -129,6 +129,8 @@ SQLite stores competition records, reminder preferences, and notification delive
 
 Use **Settings → Backup JSON** for a portable event backup and **Settings → Import JSON** to import/merge events. CSV export is for spreadsheets; it is not an import format. Back up the webview profile separately if you want to preserve the profile picture and queued offline edits. To back up the entire SQLite database, close VANTA and run on Linux:
 
+JSON and CSV downloads are served by the local API with attachment filenames so the native webviews can handle saving them. JSON import validates every row, converts offset-free wall times in the event timezone, imports valid rows in one database transaction, and shows the exact invalid rows and reasons. CSV cells beginning with spreadsheet formula characters are prefixed to prevent formula execution when opened in spreadsheet software. Native download dialogs still need manual verification on each desktop shell.
+
 ```bash
 sqlite3 "${XDG_DATA_HOME:-$HOME/.local/share}/vanta/vanta.sqlite3" \
   ".backup '$HOME/vanta-database-backup.sqlite3'"

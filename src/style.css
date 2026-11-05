@@ -419,6 +419,12 @@ h1{margin:8px 0 6px;font-size:30px;line-height:1.15;letter-spacing:-.02em}
 .form-scroll textarea{resize:vertical}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .editor-foot{display:flex;justify-content:flex-end;gap:9px;padding:14px 20px;border-top:1px solid var(--line);background:var(--panel3)}
+.modal-layer{z-index:120}
+.confirm-dialog{width:min(500px,calc(100vw - 32px));max-height:80vh;overflow:auto;padding:22px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 20px 60px #0008}
+.confirm-dialog h2{margin:8px 0;font-size:20px}
+.confirm-dialog p{color:var(--muted);font-size:12px;line-height:1.6}
+.confirm-dialog ul{max-height:42vh;overflow:auto;padding-left:20px;color:var(--text-soft);font-size:11px;line-height:1.6}
+.danger-button{display:inline-flex;align-items:center;gap:7px;padding:9px 12px;border:1px solid #753c3c;border-radius:7px;background:#472626;color:#f2b3b3;font-size:11px;cursor:pointer}
 
 @media(max-width:1050px){
   .sidebar{width:205px}

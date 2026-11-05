@@ -168,6 +168,21 @@ export async function deleteEvent(id) {
   }
 }
 
+export async function importEvents(events, indices) {
+  const result = await requestJson('/api/events/import', {
+    method: 'POST',
+    headers: {'content-type': 'application/json'},
+    body: JSON.stringify({events, indices}),
+  });
+  if (!Number.isInteger(result?.imported) || result.imported < 0 || !Array.isArray(result.skipped)) {
+    throw new ApiError('The local data service returned an invalid import report.');
+  }
+  if (result.skipped.some(item => !Number.isInteger(item?.index) || typeof item?.reason !== 'string')) {
+    throw new ApiError('The local data service returned malformed import errors.');
+  }
+  return result;
+}
+
 function reminderCache() {
   try {
     const raw = storage()?.getItem(REMINDERS_KEY);

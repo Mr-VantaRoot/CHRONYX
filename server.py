@@ -2,6 +2,8 @@
 """CHRONYX's local SQLite API and desktop reminder service."""
 
 import ipaddress
+import csv
+import io
 import json
 import os
 import shutil
@@ -19,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).resolve().parent
 MAX_REQUEST_BYTES = 256 * 1024
+MAX_IMPORT_BYTES = 4 * 1024 * 1024
 NOTIFICATION_LEASE = timedelta(minutes=2)
 ALLOWED_CATEGORIES = {
     'CTF', 'Hackathon', 'AI / ML', 'Robotics', 'Programming',
@@ -230,6 +233,29 @@ def validate_event(value):
     return result
 
 
+def export_csv(items):
+    """Render a quoted CSV backup while neutralizing spreadsheet formulas."""
+    columns = (
+        ('name', 'name'), ('category', 'category'), ('organizer', 'organizer'),
+        ('description', 'description'), ('website', 'website'),
+        ('registrationUrl', 'registrationUrl'), ('start', 'start'),
+        ('end', 'end'), ('deadline', 'deadline'), ('timezone', 'timezone'),
+        ('status', 'status'), ('priority', 'priority'), ('notes', 'notes'),
+    )
+    output = io.StringIO(newline='')
+    writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator='\r\n')
+    writer.writerow([heading for heading, _ in columns])
+    for item in items:
+        values = []
+        for _, key in columns:
+            value = str(item.get(key, '') or '')
+            if value.startswith(('=', '+', '-', '@', '\t', '\r')):
+                value = "'" + value
+            values.append(value)
+        writer.writerow(values)
+    return output.getvalue()
+
+
 def _trusted_origin(origin):
     if not origin:
         return True  # Desktop shell and local CLI clients may omit Origin.
@@ -283,12 +309,12 @@ class Handler(SimpleHTTPRequestHandler):
             return False
         return True
 
-    def _read_json(self):
+    def _read_json(self, max_bytes=MAX_REQUEST_BYTES):
         try:
             length = int(self.headers.get('Content-Length', '0'))
         except ValueError as error:
             raise ValueError('Invalid Content-Length') from error
-        if length < 1 or length > MAX_REQUEST_BYTES:
+        if length < 1 or length > max_bytes:
             raise ValueError('Request body is empty or too large')
         try:
             return json.loads(self.rfile.read(length))
@@ -307,6 +333,24 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = urlsplit(self.path).path
         try:
+            if path == '/api/export.json':
+                raw = json.dumps(events(), ensure_ascii=False, indent=2).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Content-Disposition', 'attachment; filename="vanta-competitions.json"')
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
+            if path == '/api/export.csv':
+                raw = export_csv(events()).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/csv; charset=utf-8')
+                self.send_header('Content-Disposition', 'attachment; filename="vanta-competitions.csv"')
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
             if path == '/api/events':
                 return self.send_json(events())
             if path == '/api/settings':
@@ -338,6 +382,48 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlsplit(self.path).path
+        if path == '/api/events/import':
+            if not self._check_origin():
+                return
+            try:
+                payload = self._read_json(max_bytes=MAX_IMPORT_BYTES)
+                if not isinstance(payload, dict) or not isinstance(payload.get('events'), list):
+                    raise ValueError('Import must contain an events array')
+                rows = payload['events']
+                indices = payload.get('indices')
+                if indices is None:
+                    indices = list(range(len(rows)))
+                if not isinstance(indices, list) or len(indices) != len(rows) or any(
+                    isinstance(index, bool) or not isinstance(index, int) or index < 0 for index in indices
+                ):
+                    raise ValueError('Import indices must match the events array')
+                if len(rows) > 5000:
+                    raise ValueError('An import file may contain at most 5000 events')
+                valid, skipped = [], []
+                for index, value in zip(indices, rows):
+                    try:
+                        valid.append(validate_event(value))
+                    except ValueError as error:
+                        name = value.get('name', '') if isinstance(value, dict) else ''
+                        skipped.append({'index': index, 'name': name[:200] if isinstance(name, str) else '', 'reason': str(error)})
+                if valid:
+                    with db() as connection:
+                        connection.executemany('''INSERT INTO competitions(
+                            id,name,description,category,organizer,website,registrationUrl,
+                            start,end,deadline,timezone,status,priority,notes,created
+                        ) VALUES(:id,:name,:description,:category,:organizer,:website,:registrationUrl,
+                            :start,:end,:deadline,:timezone,:status,:priority,:notes,:created)
+                        ON CONFLICT(id) DO UPDATE SET
+                            name=excluded.name,description=excluded.description,category=excluded.category,
+                            organizer=excluded.organizer,website=excluded.website,registrationUrl=excluded.registrationUrl,
+                            start=excluded.start,end=excluded.end,deadline=excluded.deadline,timezone=excluded.timezone,
+                            status=excluded.status,priority=excluded.priority,notes=excluded.notes,created=excluded.created''', valid)
+                return self.send_json({'imported': len(valid), 'skipped': skipped})
+            except ValueError as error:
+                return self.send_json({'error': str(error)}, 400)
+            except sqlite3.Error as error:
+                print(f'CHRONYX API: import transaction failed: {error}', flush=True)
+                return self.send_json({'error': 'Unable to import competitions'}, 500)
         if path == '/api/open':
             if not self._check_origin():
                 return

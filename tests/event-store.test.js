@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ApiError, loadEvents, saveEvent, deleteEvent, loadReminderSettings, saveReminderSettings} from '../src/event-store.js';
+import {ApiError, loadEvents, saveEvent, deleteEvent, importEvents, loadReminderSettings, saveReminderSettings} from '../src/event-store.js';
 
 const event = (id = 'evt-1') => ({
   id, name: 'Sample CTF', start: '2030-01-01T00:00:00Z', timezone: 'UTC',
@@ -110,4 +110,21 @@ test('invalid server response errors are not masked by local settings', async ()
   useMemoryStorage().set('vantaReminders', JSON.stringify({'7d': true}));
   globalThis.fetch = async () => jsonResponse({error: 'Invalid value'}, 400);
   await assert.rejects(saveReminderSettings({'7d': false}), error => error instanceof ApiError && error.status === 400);
+});
+
+test('JSON import uses one batch request and validates the import report', async () => {
+  let seen;
+  globalThis.fetch = async (url, options) => {
+    seen = [url, options.method, JSON.parse(options.body)];
+    return jsonResponse({imported: 1, skipped: [{index: 3, name: 'Bad row', reason: 'Unknown category'}]});
+  };
+  const report = await importEvents([event()], [2]);
+  assert.deepEqual(seen, ['/api/events/import', 'POST', {events: [event()], indices: [2]}]);
+  assert.equal(report.imported, 1);
+  assert.equal(report.skipped[0].index, 3);
+});
+
+test('invalid batch import response is rejected', async () => {
+  globalThis.fetch = async () => jsonResponse({imported: 1, skipped: 'not-an-array'});
+  await assert.rejects(importEvents([], []), /invalid import report/);
 });

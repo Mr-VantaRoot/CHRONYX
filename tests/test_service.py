@@ -30,6 +30,45 @@ def event_payload(start='2030-01-01T00:00:00Z'):
     }
 
 
+class HandlerRequest:
+    def __init__(self, body, path):
+        self.headers = {'Content-Length': str(len(body))}
+        self.rfile = io.BytesIO(body)
+        self.path = path
+        self.result = None
+
+    def send_json(self, data, status=200):
+        self.result = (status, data)
+
+    def _read_json(self, max_bytes=server.MAX_REQUEST_BYTES):
+        return server.Handler._read_json(self, max_bytes)
+
+    def _check_origin(self):
+        return server.Handler._check_origin(self)
+
+
+class HandlerGetRequest:
+    def __init__(self, path):
+        self.path = path
+        self.headers = {}
+        self.wfile = io.BytesIO()
+        self.status = None
+        self.response_headers = {}
+
+    def send_response(self, status):
+        self.status = status
+
+    def send_header(self, key, value):
+        self.response_headers[key] = value
+
+    def end_headers(self):
+        pass
+
+    def send_json(self, data, status=200):
+        self.status = status
+        self.json = data
+
+
 class ServiceTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -220,6 +259,63 @@ class ServiceTest(unittest.TestCase):
         rejected = handler(json.dumps({'url': 'file:///etc/passwd'}).encode(), path='/api/open')
         server.Handler.do_POST(rejected)
         self.assertEqual(rejected.result[0], 400)
+
+    def test_batch_import_reports_invalid_entries_and_upserts_in_one_request(self):
+        self.add_event()
+        rows = [
+            event_payload(start='2030-01-02T00:00:00Z'),
+            {**event_payload(), 'id': 'bad-event', 'category': 'Unknown'},
+        ]
+        body = json.dumps({'events': rows, 'indices': [4, 7]}).encode()
+        request = HandlerRequest(body, '/api/events/import')
+        server.Handler.do_POST(request)
+        self.assertEqual(request.result[0], 200)
+        self.assertEqual(request.result[1]['imported'], 1)
+        self.assertEqual(request.result[1]['skipped'], [{'index': 7, 'name': 'Sample CTF', 'reason': 'Unknown competition category'}])
+        self.assertEqual(server.events()[0]['start'], '2030-01-02T00:00:00+00:00')
+        self.assertEqual(len(server.events()), 1)
+
+    def test_batch_import_invalid_only_does_not_change_database(self):
+        self.add_event()
+        request = HandlerRequest(json.dumps({'events': [{'name': 'bad'}], 'indices': [0]}).encode(), '/api/events/import')
+        server.Handler.do_POST(request)
+        self.assertEqual(request.result[1]['imported'], 0)
+        self.assertEqual(len(request.result[1]['skipped']), 1)
+        self.assertEqual(len(server.events()), 1)
+
+    def test_batch_import_rolls_back_all_rows_when_database_write_fails(self):
+        with server.db() as connection:
+            connection.execute('''CREATE TRIGGER reject_import BEFORE INSERT ON competitions
+                WHEN NEW.id='reject' BEGIN SELECT RAISE(ABORT, 'blocked'); END''')
+        rows = [event_payload(), {**event_payload(), 'id': 'reject'}]
+        request = HandlerRequest(json.dumps({'events': rows, 'indices': [0, 1]}).encode(), '/api/events/import')
+        server.Handler.do_POST(request)
+        self.assertEqual(request.result[0], 500)
+        self.assertEqual(server.events(), [])
+
+    def test_csv_export_quotes_fields_and_neutralizes_spreadsheet_formulas(self):
+        from csv import reader
+        csv_text = server.export_csv([{
+            'name': '=1+1', 'category': '+cmd', 'organizer': '-2+3',
+            'description': '@SUM(A1:A2)', 'website': '\t=HYPERLINK("x")',
+            'registrationUrl': 'https://example.test', 'start': '2030-01-01T00:00:00Z',
+            'end': '', 'deadline': '', 'timezone': 'UTC', 'status': 'Interested',
+            'priority': 'Low', 'notes': '\r=1+1',
+        }])
+        rows = list(reader(io.StringIO(csv_text, newline='')))
+        self.assertEqual(rows[0], ['name', 'category', 'organizer', 'description', 'website', 'registrationUrl', 'start', 'end', 'deadline', 'timezone', 'status', 'priority', 'notes'])
+        self.assertEqual(rows[1][0:5], ["'=1+1", "'+cmd", "'-2+3", "'@SUM(A1:A2)", "'\t=HYPERLINK(\"x\")"])
+        self.assertEqual(rows[1][-1], "'\r=1+1")
+
+    def test_export_endpoints_set_attachment_headers(self):
+        self.add_event()
+        for extension, mime in [('json', 'application/json; charset=utf-8'), ('csv', 'text/csv; charset=utf-8')]:
+            request = HandlerGetRequest(f'/api/export.{extension}')
+            server.Handler.do_GET(request)
+            self.assertEqual(request.status, 200)
+            self.assertEqual(request.response_headers['Content-Type'], mime)
+            self.assertIn('attachment; filename=', request.response_headers['Content-Disposition'])
+            self.assertEqual(int(request.response_headers['Content-Length']), len(request.wfile.getvalue()))
 
 
 def subprocess_error():
