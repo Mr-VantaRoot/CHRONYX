@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+import webbrowser
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -336,7 +337,22 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({'error': str(error)}, 400)
 
     def do_POST(self):
-        if urlsplit(self.path).path != '/api/events':
+        path = urlsplit(self.path).path
+        if path == '/api/open':
+            if not self._check_origin():
+                return
+            try:
+                payload = self._read_json()
+                value = payload.get('url') if isinstance(payload, dict) else None
+                parsed = urlsplit(value) if isinstance(value, str) else None
+                if not parsed or parsed.scheme not in ('http', 'https') or not parsed.hostname:
+                    raise ValueError('Only valid HTTP and HTTPS links can be opened')
+                if not webbrowser.open(value, new=2):
+                    return self.send_json({'error': 'Could not open the system browser'}, 500)
+                return self.send_json({'ok': True})
+            except ValueError as error:
+                return self.send_json({'error': str(error)}, 400)
+        if path != '/api/events':
             return self.send_json({'error': 'Not found'}, 404)
         return self._write_event(created=True)
 

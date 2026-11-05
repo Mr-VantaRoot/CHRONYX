@@ -272,6 +272,9 @@ h1{margin:8px 0 6px;font-size:30px;line-height:1.15;letter-spacing:-.02em}
 .card-count{margin-left:auto;color:var(--muted);white-space:nowrap}
 .deadline-line{display:flex;align-items:center;gap:5px;margin-top:8px;padding-top:7px;border-top:1px solid var(--line);color:#a5ad92;font-size:9px}
 .deadline-line svg{flex:none;color:var(--muted)}
+.card-links{display:flex;gap:10px;margin-top:7px}
+.card-links button{display:inline-flex;align-items:center;gap:3px;padding:0;border:0;background:none;color:var(--accent);font-size:9px;cursor:pointer}
+.card-links button:hover{text-decoration:underline}
 
 .status{
   display:inline-flex;align-items:center;
@@ -354,6 +357,10 @@ h1{margin:8px 0 6px;font-size:30px;line-height:1.15;letter-spacing:-.02em}
 }
 :root[data-theme='light'] .calendar-event{background:#e4ecdd;color:#3c4a38}
 .calendar-event:hover{background:#2c362e;color:var(--text)}
+.calendar-event.calendar-deadline{background:#382f21;color:#e5c68b;border-left:2px solid #c89b4f}
+:root[data-theme='light'] .calendar-event.calendar-deadline{background:#f4ead4;color:#71551f}
+.calendar-event.calendar-deadline:hover{filter:brightness(1.08)}
+.agenda-item.agenda-deadline .category-dot{background:#c89b4f}
 
 .agenda-list,.day-schedule{overflow:hidden;background:var(--panel);border:1px solid var(--line);border-radius:10px}
 .agenda-item{display:flex;align-items:center;gap:13px;width:100%;padding:14px;border:0;border-bottom:1px solid var(--line);background:none;color:var(--text);text-align:left}

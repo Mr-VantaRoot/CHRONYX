@@ -211,6 +211,16 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(valid_settings.result[0], 200)
         self.assertEqual(valid_settings.result[1], {'7d': True, '3d': True, '1d': False, '1h': True, 'customHours': 12})
 
+        external = handler(json.dumps({'url': 'https://example.com/event'}).encode(), path='/api/open')
+        with patch('server.webbrowser.open', return_value=True) as open_browser:
+            server.Handler.do_POST(external)
+        self.assertEqual(external.result[0], 200)
+        open_browser.assert_called_once_with('https://example.com/event', new=2)
+
+        rejected = handler(json.dumps({'url': 'file:///etc/passwd'}).encode(), path='/api/open')
+        server.Handler.do_POST(rejected)
+        self.assertEqual(rejected.result[0], 400)
+
 
 def subprocess_error():
     import subprocess
