@@ -56,6 +56,27 @@ test('network-failed saves persist locally and synchronize when service returns'
   assert.deepEqual(JSON.parse(values.get('vantaEventOutbox')), []);
 });
 
+test('queued saves use POST when the event no longer exists on the server', async () => {
+  const values = useMemoryStorage();
+  globalThis.fetch = async () => { throw new TypeError('connection refused'); };
+  await saveEvent(event(), false);
+
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const method = options.method || 'GET';
+    requests.push([url, method]);
+    if (url === '/api/events' && method === 'GET') return jsonResponse([]);
+    if (url === '/api/events' && method === 'PUT') return jsonResponse({error: 'Competition not found'}, 404);
+    if (url === '/api/events' && method === 'POST') return jsonResponse(event(), 201);
+    throw new Error(`Unexpected request ${method} ${url}`);
+  };
+
+  const loaded = await loadEvents();
+  assert.deepEqual(loaded.events, [event()]);
+  assert.deepEqual(requests, [['/api/events', 'GET'], ['/api/events', 'PUT'], ['/api/events', 'POST']]);
+  assert.deepEqual(JSON.parse(values.get('vantaEventOutbox')), []);
+});
+
 test('network-failed deletions are queued and stay deleted after synchronization', async () => {
   const values = useMemoryStorage();
   values.set('vantaEvents', JSON.stringify([event()]));

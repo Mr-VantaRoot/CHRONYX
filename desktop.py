@@ -1,7 +1,9 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """Launch the bundled app in the platform's native webview window."""
+import ctypes
 import os
 import json
+import sys
 import threading
 import time
 from urllib.request import urlopen
@@ -9,6 +11,34 @@ from urllib.request import urlopen
 from server import Handler, LocalHTTPServer, notification_loop
 
 service = None
+_windows_mutex = None
+
+
+def windows_mutex_is_existing(last_error):
+    """Return whether CreateMutexW found the named desktop instance."""
+    return last_error == 183  # ERROR_ALREADY_EXISTS
+
+
+def acquire_windows_instance():
+    """Keep a named mutex alive for this process to prevent duplicate windows."""
+    global _windows_mutex
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    create_mutex = kernel32.CreateMutexW
+    create_mutex.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+    create_mutex.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    handle = create_mutex(None, False, 'Local\\CHRONYX.Desktop')
+    if not handle:
+        raise OSError(ctypes.get_last_error(), 'Could not create the CHRONYX instance mutex')
+    if windows_mutex_is_existing(ctypes.get_last_error()):
+        close_handle(handle)
+        return False
+    _windows_mutex = (kernel32, handle)
+    return True
 
 def start_or_attach_service():
     """Start one local API/scheduler, or attach to an existing CHRONYX one."""
@@ -54,7 +84,14 @@ def run_windows():
 
 
 def run_linux():
-    from gi import require_version
+    try:
+        from gi import require_version
+    except ImportError as error:
+        raise SystemExit(
+            f'CHRONYX could not import Python GObject bindings using {sys.executable}. '
+            'Install the system Python GObject bindings and GTK 3 / WebKitGTK 4.1 '
+            '(for example, python3-gobject, GTK 3, and WebKitGTK 4.1 packages).'
+        ) from error
     require_version('Gtk', '3.0')
     require_version('WebKit2', '4.1')
     from gi.repository import Gtk, WebKit2
@@ -88,6 +125,11 @@ def run_linux():
 
 def main():
     global service
+    if os.name == 'nt' and not acquire_windows_instance():
+        ctypes.WinDLL('user32').MessageBoxW(
+            None, 'CHRONYX is already running.', 'CHRONYX', 0x40,
+        )
+        return
     try:
         service = start_or_attach_service()
     except RuntimeError as error:

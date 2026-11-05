@@ -1,6 +1,7 @@
 import json
 import io
 import os
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -36,6 +37,7 @@ class HandlerRequest:
         self.rfile = io.BytesIO(body)
         self.path = path
         self.result = None
+        self.close_connection = False
 
     def send_json(self, data, status=200):
         self.result = (status, data)
@@ -45,6 +47,9 @@ class HandlerRequest:
 
     def _check_origin(self):
         return server.Handler._check_origin(self)
+
+    def _write_event(self, created):
+        return server.Handler._write_event(self, created)
 
 
 class HandlerGetRequest:
@@ -64,9 +69,16 @@ class HandlerGetRequest:
     def end_headers(self):
         pass
 
+    def send_error(self, status, message=''):
+        self.status = status
+        self.error = message
+
     def send_json(self, data, status=200):
         self.status = status
         self.json = data
+
+    def _frontend_unavailable(self, head=False):
+        return server.Handler._frontend_unavailable(self, head)
 
 
 class ServiceTest(unittest.TestCase):
@@ -304,6 +316,162 @@ class ServiceTest(unittest.TestCase):
         rejected = handler(json.dumps({'url': 'file:///etc/passwd'}).encode(), path='/api/open')
         server.Handler.do_POST(rejected)
         self.assertEqual(rejected.result[0], 400)
+
+    def test_post_refuses_duplicate_ids_and_put_refuses_missing_ids(self):
+        self.add_event()
+        duplicate = HandlerRequest(json.dumps(event_payload()).encode(), '/api/events')
+        server.Handler.do_POST(duplicate)
+        self.assertEqual(duplicate.result[0], 409)
+        self.assertEqual(server.events()[0]['name'], 'Sample CTF')
+
+        missing = HandlerRequest(json.dumps({**event_payload(), 'id': 'not-present'}).encode(), '/api/events')
+        server.Handler.do_PUT(missing)
+        self.assertEqual(missing.result[0], 404)
+        self.assertEqual(len(server.events()), 1)
+
+    def test_host_and_origin_validation_close_unread_requests(self):
+        request = HandlerRequest(b'', '/api/events')
+        request.server = SimpleNamespace(server_address=('127.0.0.1', 12345))
+        request.headers['Host'] = 'attacker.invalid:12345'
+        self.assertFalse(server.Handler._check_host(request))
+        self.assertTrue(request.close_connection)
+        self.assertEqual(request.result[0], 403)
+
+        request = HandlerRequest(b'', '/api/events')
+        request.headers['Origin'] = 'https://attacker.invalid'
+        self.assertFalse(server.Handler._check_origin(request))
+        self.assertTrue(request.close_connection)
+        self.assertEqual(request.result[0], 403)
+
+        request = HandlerRequest(b'', '/not-an-api-route')
+        request.close_connection = False
+        server.Handler.do_POST(request)
+        self.assertTrue(request.close_connection)
+        self.assertEqual(request.result[0], 404)
+
+    def test_parse_request_checks_host_and_origin_for_api_reads(self):
+        def request_for(method, path, headers=''):
+            request = server.Handler.__new__(server.Handler)
+            request.raw_requestline = f'{method} {path} HTTP/1.1\r\n'.encode()
+            request.rfile = io.BytesIO((headers + '\r\n').encode())
+            request.wfile = io.BytesIO()
+            request.server = SimpleNamespace(server_address=('127.0.0.1', 8765))
+            request.close_connection = True
+            request._headers_buffer = []
+            return request
+
+        bad_origin = request_for(
+            'GET', '/api/events',
+            'Host: localhost:8765\r\nOrigin: https://attacker.invalid\r\n',
+        )
+        self.assertFalse(server.Handler.parse_request(bad_origin))
+        self.assertTrue(bad_origin.close_connection)
+        self.assertIn(b'403 Forbidden', bad_origin.wfile.getvalue())
+
+        bad_host = request_for('GET', '/index.html', 'Host: attacker.invalid:8765\r\n')
+        self.assertFalse(server.Handler.parse_request(bad_host))
+        self.assertTrue(bad_host.close_connection)
+        self.assertIn(b'403 Forbidden', bad_host.wfile.getvalue())
+
+    def test_security_headers_include_cross_origin_and_permissions_policies(self):
+        class HeaderRecorder(server.Handler):
+            def __init__(self):
+                self.headers = {}
+                self.path = '/'
+                self.close_connection = True
+                self.request_version = 'HTTP/1.1'
+                self.captured = {}
+                self._headers_buffer = []
+                self.wfile = io.BytesIO()
+
+            def send_header(self, key, value):
+                self.captured[key] = value
+                self._headers_buffer.append(f'{key}: {value}\r\n'.encode())
+
+        request = HeaderRecorder()
+        server.Handler.end_headers(request)
+        self.assertEqual(request.captured['Cross-Origin-Resource-Policy'], 'same-origin')
+        self.assertEqual(request.captured['Cross-Origin-Opener-Policy'], 'same-origin')
+        self.assertEqual(request.captured['Permissions-Policy'], 'camera=(), microphone=(), geolocation=()')
+        self.assertIn('Content-Security-Policy', request.captured)
+        self.assertEqual(request.captured['Connection'], 'close')
+
+    def test_frontend_is_confined_to_dist_without_dotfiles_or_directory_listing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / 'dist'
+            root.mkdir()
+            outside = Path(temp) / 'secret.txt'
+            outside.write_text('secret')
+            (root / 'link.txt').symlink_to(outside)
+            (root / 'index.html').write_text('app')
+            self.assertEqual(server.frontend_file_path('/index.html', root), root / 'index.html')
+            self.assertIsNone(server.frontend_file_path('/.secret', root))
+            self.assertIsNone(server.frontend_file_path('/link.txt', root))
+
+        listing = HandlerGetRequest('/')
+        server.Handler.list_directory(listing, '/')
+        self.assertEqual(listing.status, 404)
+
+    def test_missing_frontend_returns_actionable_503_but_missing_api_is_404(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with patch('server.ROOT', Path(temp)):
+                page = HandlerGetRequest('/index.html')
+                server.Handler.do_GET(page)
+                self.assertEqual(page.status, 503)
+                self.assertIn(b'Frontend not built. Run npm run build', page.wfile.getvalue())
+
+                api = HandlerGetRequest('/api/missing')
+                server.Handler.do_GET(api)
+                self.assertEqual(api.status, 404)
+
+    def test_http_host_origin_and_oversize_pipeline_close_connections(self):
+        try:
+            httpd = server.LocalHTTPServer(('127.0.0.1', 0), server.Handler)
+        except PermissionError:
+            self.skipTest('Sandbox does not allow binding a local HTTP socket')
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        port = httpd.server_address[1]
+
+        def exchange(data):
+            try:
+                with socket.create_connection(('127.0.0.1', port), timeout=2) as client:
+                    client.settimeout(2)
+                    client.sendall(data)
+                    chunks = []
+                    while True:
+                        try:
+                            chunk = client.recv(4096)
+                        except socket.timeout:
+                            break
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                    return b''.join(chunks)
+            except PermissionError:
+                self.skipTest('Sandbox does not allow local HTTP client sockets')
+
+        try:
+            bad_host = exchange(f'GET /api/events HTTP/1.1\r\nHost: attacker.invalid:{port}\r\n\r\n'.encode())
+            self.assertIn(b'403 Forbidden', bad_host)
+            self.assertIn(b'Connection: close', bad_host)
+
+            bad_origin = exchange(f'GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: https://attacker.invalid\r\n\r\n'.encode())
+            self.assertIn(b'403 Forbidden', bad_origin)
+            self.assertIn(b'Connection: close', bad_origin)
+
+            pipeline = (
+                f'POST /api/events HTTP/1.1\r\nHost: localhost:{port}\r\n'
+                f'Content-Length: {server.MAX_REQUEST_BYTES + 1}\r\n\r\n'
+                f'GET /api/events HTTP/1.1\r\nHost: localhost:{port}\r\n\r\n'
+            ).encode()
+            response = exchange(pipeline)
+            self.assertIn(b'400 Bad Request', response)
+            self.assertIn(b'Connection: close', response)
+            self.assertEqual(response.count(b'HTTP/1.1 '), 1)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
 
     def test_batch_import_reports_invalid_entries_and_upserts_in_one_request(self):
         self.add_event()

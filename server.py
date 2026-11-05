@@ -269,22 +269,54 @@ def _trusted_origin(origin):
         return False
 
 
+def frontend_file_path(request_path, root=None):
+    """Resolve a static request only within dist and reject dotfiles/symlinks out."""
+    root = Path(root or ROOT / 'dist').resolve()
+    decoded = unquote(urlsplit(request_path).path)
+    if any(part.startswith('.') for part in decoded.split('/')):
+        return None
+    candidate = root.joinpath(*[part for part in decoded.split('/') if part not in ('', '.', '..')]).resolve()
+    return candidate if candidate.is_relative_to(root) else None
+
+
 class Handler(SimpleHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(ROOT / 'dist' if (ROOT / 'dist').exists() else ROOT), **kwargs)
+        super().__init__(*args, directory=str(ROOT / 'dist'), **kwargs)
+
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        if not self._check_host():
+            return False
+        path = urlsplit(self.path).path
+        if (path == '/api' or path.startswith('/api/')) and not self._check_origin():
+            return False
+        if self.command not in ('POST', 'PUT', 'PATCH') and (
+            self.headers.get('Transfer-Encoding')
+            or self.headers.get('Content-Length') not in (None, '', '0')
+        ):
+            # The remaining handlers do not consume request bodies. Close after
+            # responding so an unexpected body cannot become the next request.
+            self.close_connection = True
+        return True
 
     def log_message(self, *args):
         pass
 
     def end_headers(self):
+        if getattr(self, 'close_connection', False):
+            self.send_header('Connection', 'close')
         origin = self.headers.get('Origin')
         if origin and _trusted_origin(origin):
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
+        self.send_header('Cross-Origin-Opener-Policy', 'same-origin')
+        self.send_header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
         self.send_header(
             'Content-Security-Policy',
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
@@ -302,9 +334,29 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _check_host(self):
+        value = self.headers.get('Host', '')
+        port = getattr(getattr(self, 'server', None), 'server_address', ('127.0.0.1', 8765))[1]
+        try:
+            host = urlsplit(f'//{value}')
+            valid = (
+                host.hostname in ('127.0.0.1', 'localhost')
+                and host.port == port
+                and not host.username and not host.password
+                and not host.path and not host.query and not host.fragment
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            self.close_connection = True
+            self.send_json({'error': 'Host must be the local CHRONYX address'}, 403)
+            return False
+        return True
+
     def _check_origin(self):
         origin = self.headers.get('Origin')
         if not _trusted_origin(origin):
+            self.close_connection = True
             self.send_json({'error': 'Requests must come from the local application'}, 403)
             return False
         return True
@@ -313,13 +365,44 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             length = int(self.headers.get('Content-Length', '0'))
         except ValueError as error:
+            self.close_connection = True
             raise ValueError('Invalid Content-Length') from error
         if length < 1 or length > max_bytes:
+            self.close_connection = True
             raise ValueError('Request body is empty or too large')
         try:
-            return json.loads(self.rfile.read(length))
+            raw = self.rfile.read(length)
+            if len(raw) != length:
+                self.close_connection = True
+                raise ValueError('Request body was incomplete')
+            return json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            self.close_connection = True
             raise ValueError('Request body must contain valid JSON') from error
+
+    def _frontend_unavailable(self, head=False):
+        body = b'Frontend not built. Run npm run build.\n'
+        self.send_response(503)
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        if not head:
+            self.wfile.write(body)
+
+    def translate_path(self, path):
+        return super().translate_path(path)
+
+    def send_head(self):
+        root = (ROOT / 'dist').resolve()
+        candidate = frontend_file_path(self.path, root)
+        if candidate is None:
+            self.send_error(404, 'Not found')
+            return None
+        return super().send_head()
+
+    def list_directory(self, path):
+        self.send_error(404, 'Directory listing disabled')
+        return None
 
     def do_OPTIONS(self):
         if not self._check_origin():
@@ -360,7 +443,22 @@ class Handler(SimpleHTTPRequestHandler):
         except (sqlite3.Error, ValueError, json.JSONDecodeError):
             print('CHRONYX API: unable to read local data', flush=True)
             return self.send_json({'error': 'Unable to read local data'}, 500)
+        if path == '/api' or path.startswith('/api/'):
+            return self.send_json({'error': 'Not found'}, 404)
+        if not (ROOT / 'dist').is_dir():
+            return self._frontend_unavailable()
         return super().do_GET()
+
+    def do_HEAD(self):
+        path = urlsplit(self.path).path
+        if path == '/api' or path.startswith('/api/'):
+            self.send_response(404)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if not (ROOT / 'dist').is_dir():
+            return self._frontend_unavailable(head=True)
+        return super().do_HEAD()
 
     def _write_event(self, created):
         if not self._check_origin():
@@ -368,12 +466,26 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             event = validate_event(self._read_json())
             with db() as connection:
-                connection.execute('''INSERT OR REPLACE INTO competitions(
-                    id,name,description,category,organizer,website,registrationUrl,
-                    start,end,deadline,timezone,status,priority,notes,created
-                ) VALUES(:id,:name,:description,:category,:organizer,:website,:registrationUrl,
-                    :start,:end,:deadline,:timezone,:status,:priority,:notes,:created)''', event)
+                if created:
+                    connection.execute('''INSERT INTO competitions(
+                        id,name,description,category,organizer,website,registrationUrl,
+                        start,end,deadline,timezone,status,priority,notes,created
+                    ) VALUES(:id,:name,:description,:category,:organizer,:website,:registrationUrl,
+                        :start,:end,:deadline,:timezone,:status,:priority,:notes,:created)''', event)
+                else:
+                    cursor = connection.execute('''UPDATE competitions SET
+                        name=:name,description=:description,category=:category,organizer=:organizer,
+                        website=:website,registrationUrl=:registrationUrl,start=:start,end=:end,
+                        deadline=:deadline,timezone=:timezone,status=:status,priority=:priority,
+                        notes=:notes,created=:created WHERE id=:id''', event)
+                    if cursor.rowcount == 0:
+                        return self.send_json({'error': 'Competition not found'}, 404)
             return self.send_json(event, 201 if created else 200)
+        except sqlite3.IntegrityError as error:
+            if created:
+                return self.send_json({'error': 'A competition with this ID already exists'}, 409)
+            print(f'CHRONYX API: database write failed: {error}', flush=True)
+            return self.send_json({'error': 'Unable to save competition'}, 500)
         except (ValueError, sqlite3.Error) as error:
             if isinstance(error, sqlite3.Error):
                 print(f'CHRONYX API: database write failed: {error}', flush=True)
@@ -439,16 +551,19 @@ class Handler(SimpleHTTPRequestHandler):
             except ValueError as error:
                 return self.send_json({'error': str(error)}, 400)
         if path != '/api/events':
+            self.close_connection = True
             return self.send_json({'error': 'Not found'}, 404)
         return self._write_event(created=True)
 
     def do_PUT(self):
         if urlsplit(self.path).path != '/api/events':
+            self.close_connection = True
             return self.send_json({'error': 'Not found'}, 404)
         return self._write_event(created=False)
 
     def do_PATCH(self):
         if urlsplit(self.path).path != '/api/settings':
+            self.close_connection = True
             return self.send_json({'error': 'Not found'}, 404)
         if not self._check_origin():
             return

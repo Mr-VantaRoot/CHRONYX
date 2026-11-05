@@ -95,7 +95,13 @@ async function syncOutbox(remoteEvents, operations) {
       await requestJson(path, options);
     } catch (error) {
       // Deleting an already-absent row has the same final state.
-      if (!(op.type === 'delete' && error instanceof ApiError && error.status === 404)) throw error;
+      if (op.type === 'save' && error instanceof ApiError && error.status === 404) {
+        await requestJson('/api/events', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(op.event),
+        });
+      } else if (!(op.type === 'delete' && error instanceof ApiError && error.status === 404)) {
+        throw error;
+      }
     }
     remaining.shift();
     writeOutbox(remaining);

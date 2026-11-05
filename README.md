@@ -7,17 +7,18 @@ CHRONYX (the VANTA Competition Tracker) is an offline-first desktop app for trac
 - Track CTFs, hackathons, AI/ML events, robotics competitions, programming contests, scholarships, and other opportunities.
 - Create, edit, duplicate, complete, and delete events; save descriptions, organisers, links, dates, deadlines, time zones, status, priority, and notes.
 - Live start and deadline countdowns, dashboard summaries, upcoming events, and recent activity.
-- Month, week, day, and agenda calendar views.
+- Month, week, day, and agenda calendar views, with separate deadline markers and multi-day events.
+- Competition website and registration links open in the system browser.
 - Search and filter by category, status, and priority; sort by start date or registration deadline.
-- Desktop reminders 7 days, 3 days, 1 day, or 1 hour before starts and registration deadlines; supports a custom hour offset and retries failed delivery.
-- JSON backup/import, CSV export, and dark/light themes.
+- Desktop reminders 7 days, 3 days, 1 day, or 1 hour before starts and registration deadlines; supports a custom hour offset, retries failed delivery, and sends one catch-up reminder after downtime.
+- JSON backup/import, CSV export through attachment downloads in the native shells, and dark/light themes.
 - A device-local profile picture shown in the workspace sidebar.
 
 ## Platform support and verification status
 
 | Platform | Desktop view | Installation | Tested here |
 | --- | --- | --- | --- |
-| Fedora Linux 44 | GTK 3 + WebKitGTK 4.1 + PyGObject | RPM or per-user install | **Partially verified:** tests, GTK/WebKit imports, RPM build, and notifier package mapping passed; a live desktop notification and installed RPM launch were not exercised |
+| Fedora Linux 44 | GTK 3 + WebKitGTK 4.1 + PyGObject | RPM or per-user install | **Partially verified:** tests, GTK/WebKit imports, RPM recipe checks, and notifier package mapping passed; live desktop notifications and installed RPM launch still need manual verification |
 | Ubuntu 24.04 LTS or newer | GTK 3 + WebKitGTK 4.1 + PyGObject | Install native dependencies, then `./install-user.sh` | **Not verified:** package names checked against Ubuntu package metadata; no Ubuntu runtime was available |
 | Kali Linux rolling | GTK 3 + WebKitGTK 4.1 + PyGObject | Install available Debian-based dependencies, then `./install-user.sh` | **Not verified:** no Kali runtime was available |
 | Windows 10/11 | pywebview + Microsoft Edge WebView2 Runtime | `install-windows.ps1` | **Not verified:** APPDATA paths are covered by unit tests; PowerShell and a native Windows desktop were unavailable |
@@ -26,16 +27,19 @@ The frontend, countdown code, local API, and SQLite schema are shared. Native wi
 
 ## Install on Fedora
 
-The repository includes `vanta-1.0.0-7.fc44.noarch.rpm`:
+Download the RPM and checksum file from the [latest GitHub Release](https://github.com/Mr-VantaRoot/CHRONYX/releases/latest), then verify and install them:
 
 ```bash
-sudo dnf install ./vanta-1.0.0-7.fc44.noarch.rpm
+curl -fLO https://github.com/Mr-VantaRoot/CHRONYX/releases/latest/download/vanta-1.0.0-8.fc44.noarch.rpm
+curl -fLO https://github.com/Mr-VantaRoot/CHRONYX/releases/latest/download/SHA256SUMS
+sha256sum --check SHA256SUMS
+sudo dnf install ./vanta-1.0.0-8.fc44.noarch.rpm
 ```
 
 If the machine is offline and GTK 3, WebKitGTK 4.1, Python, and PyGObject are already installed, skip repository refresh:
 
 ```bash
-sudo dnf install --disablerepo='*' ./vanta-1.0.0-7.fc44.noarch.rpm
+sudo dnf install --disablerepo='*' ./vanta-1.0.0-8.fc44.noarch.rpm
 ```
 
 Launch **VANTA Competition Tracker** from the applications menu or run `vanta` in a terminal.
@@ -53,7 +57,7 @@ The script stages and checks the files before replacing `~/.local/lib/vanta`, cr
 
 ### Linux runtime dependencies
 
-The Linux shell needs Python 3, GTK 3, WebKitGTK 4.1, PyGObject bindings for the same Python interpreter that launches CHRONYX, and IANA timezone data. `notify-send` is required for Linux desktop reminders (`libnotify` on Fedora, `libnotify-bin` on Debian-derived systems). Without it, event tracking still works and the reminder service records retryable failures.
+The Linux shell needs Python 3.10+, GTK 3, WebKitGTK 4.1, PyGObject bindings for the same Python interpreter that launches CHRONYX, and IANA timezone data. `notify-send` is required for Linux desktop reminders (`libnotify` on Fedora, `libnotify-bin` on Debian-derived systems). Without it, event tracking still works and the reminder service records retryable failures.
 
 For a source install on Fedora, install dependencies with `sudo dnf install python3 gtk3 webkit2gtk4.1 python3-gobject libnotify tzdata`. The Fedora RPM declares these requirements itself.
 
@@ -129,7 +133,7 @@ SQLite stores competition records, reminder preferences, and notification delive
 
 Use **Settings → Backup JSON** for a portable event backup and **Settings → Import JSON** to import/merge events. CSV export is for spreadsheets; it is not an import format. Back up the webview profile separately if you want to preserve the profile picture and queued offline edits. To back up the entire SQLite database, close VANTA and run on Linux:
 
-JSON and CSV downloads are served by the local API with attachment filenames so the native webviews can handle saving them. JSON import validates every row, converts offset-free wall times in the event timezone, imports valid rows in one database transaction, and shows the exact invalid rows and reasons. CSV cells beginning with spreadsheet formula characters are prefixed to prevent formula execution when opened in spreadsheet software. Native download dialogs still need manual verification on each desktop shell.
+JSON and CSV downloads use the local API's attachment endpoints as a fallback that does not depend on browser blob support. JSON import validates every row, converts offset-free wall times in the event timezone, imports valid rows in one database transaction, and shows the exact invalid rows and reasons. CSV cells beginning with spreadsheet formula characters are prefixed to prevent formula execution when opened in spreadsheet software. Native save-dialog behavior still needs manual verification on each desktop shell.
 
 ```bash
 sqlite3 "${XDG_DATA_HOME:-$HOME/.local/share}/vanta/vanta.sqlite3" \
@@ -142,7 +146,7 @@ On Windows, close VANTA and copy `%APPDATA%\VANTA\vanta.sqlite3` to your backup 
 
 ### Requirements
 
-- Python 3.9+ and SQLite (Python's standard-library `sqlite3`).
+- Python 3.10+ and SQLite (Python's standard-library `sqlite3`).
 - Node.js 20+ and npm for the frontend build.
 - Linux desktop development: GTK 3, WebKitGTK 4.1, and PyGObject.
 - Windows desktop development: Python 3.10+, Edge WebView2 Runtime, PowerShell 5.1 or newer for the installer, and packages in `requirements-windows.txt`.
@@ -171,7 +175,7 @@ Open the Vite URL printed in Terminal 2, usually `http://127.0.0.1:5173`. Vite p
 npm run build
 npm test
 python3 -m unittest discover -s tests -v
-npx tsc --noEmit
+npm run typecheck
 python3 -m py_compile server.py desktop.py
 sh -n install-user.sh uninstall-user.sh
 ```
@@ -180,17 +184,18 @@ The production UI is written to `dist/`. Tests cover countdowns, DST gaps/folds 
 
 ### Build the Fedora RPM
 
-Build the frontend first. From the parent directory of this repository:
+Build the frontend first. These commands work from a fresh clone named `CHRONYX` or another directory name:
 
 ```bash
-npm --prefix vanta run build
+npm run build
+PROJECT_DIR=$(basename "$PWD")
+PROJECT_PARENT=$(dirname "$PWD")
 mkdir -p "$HOME/rpmbuild/SOURCES"
-tar --exclude='vanta/node_modules' --exclude='vanta/.git' \
-  --exclude='vanta/__pycache__' --exclude='vanta/tests/__pycache__' \
-  --exclude='vanta/.venv' --exclude='vanta/*.rpm' \
-  --transform='s,^vanta,vanta-1.0.0,' \
-  -czf "$HOME/rpmbuild/SOURCES/vanta-1.0.0.tar.gz" vanta
-rpmbuild -bb --define "_topdir $HOME/rpmbuild" vanta/packaging/vanta.spec
+tar -C "$PROJECT_PARENT" --exclude='node_modules' --exclude='.git' \
+  --exclude='__pycache__' --exclude='.venv' --exclude='*.rpm' \
+  --transform="s,^${PROJECT_DIR}/,vanta-1.0.0/," \
+  -czf "$HOME/rpmbuild/SOURCES/vanta-1.0.0.tar.gz" "$PROJECT_DIR"
+rpmbuild -bb --define "_topdir $HOME/rpmbuild" packaging/vanta.spec
 ```
 
 The RPM is written under `~/rpmbuild/RPMS/noarch/`. Increment `Release` and add a changelog entry in `packaging/vanta.spec` for each package build. The Fedora package requires `libnotify`, which provides `notify-send` on this Fedora build host.
@@ -205,11 +210,17 @@ The RPM is written under `~/rpmbuild/RPMS/noarch/`. Increment `Release` and add 
 
 ## Security assumptions
 
-CHRONYX is a single-user desktop application. The local API binds to IPv4 loopback, uses parameterized SQL, validates write payloads, limits JSON request size, rejects non-loopback browser Origins on writes, and does not expose authentication because it is not intended as a network server. Any process running as the same OS user can access the database and local profile data. Do not expose port 8765 through a proxy or bind it to a public interface.
+CHRONYX is a single-user desktop application. The local API binds to IPv4 loopback and validates the Host header on every request and the Origin header on API requests that include one. This protects reads and writes against DNS rebinding; native-shell requests without an Origin remain allowed. The server uses parameterized SQL, validates write payloads, and limits JSON request size. Authentication is intentionally absent because the service is only for the local desktop application. Any process running as the same OS user can access the database and local profile data. Do not expose port 8765 through a proxy or bind it to a public interface.
+
+## GitHub repository metadata
+
+Suggested repository description: **Offline-first desktop tracker for competitions, CTFs, deadlines, and reminders.**
+
+Suggested GitHub topics: `tracker`, `ctf`, `desktop-app`, `offline-first`, `sqlite`, `react`, `webkitgtk`, `pywebview`.
 
 ## Continuous integration
 
-GitHub Actions runs the test/build/type-check suite on Ubuntu 24.04 and Windows Server 2022 with Python 3.10 and 3.13. The Ubuntu job checks GTK/WebKitGTK imports and builds the RPM recipe; the Windows job parses both PowerShell scripts. This CI does not simulate a logged-in desktop, Windows toast delivery, or Kali. Fedora desktop testing remains a local check, and native GUI validation is still needed on Windows, Ubuntu, and Kali.
+GitHub Actions runs the test/build/type-check suite on Ubuntu 24.04 and Windows Server 2022 with Python 3.10, 3.13, and 3.14. The Ubuntu job checks GTK/WebKitGTK imports, checks that committed `dist/` matches the build, and validates the RPM recipe. The Windows job parses both PowerShell scripts. This CI does not simulate a logged-in desktop, Windows toast delivery, or Kali. Fedora desktop testing remains a local check, and native GUI validation is still needed on Windows, Ubuntu, and Kali.
 
 ## Technical overview
 

@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import ctypes
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,20 @@ import desktop
 
 
 class DesktopStartupTest(unittest.TestCase):
+    def test_windows_instance_mutex_is_retained_or_duplicate_handle_closed(self):
+        kernel = Mock()
+        kernel.CreateMutexW.return_value = 123
+        with patch.object(desktop.ctypes, 'WinDLL', return_value=kernel, create=True), \
+             patch.object(desktop.ctypes, 'get_last_error', return_value=0, create=True):
+            self.assertTrue(desktop.acquire_windows_instance())
+        self.assertEqual(desktop._windows_mutex, (kernel, 123))
+
+        kernel.CloseHandle.reset_mock()
+        with patch.object(desktop.ctypes, 'WinDLL', return_value=kernel, create=True), \
+             patch.object(desktop.ctypes, 'get_last_error', return_value=183, create=True):
+            self.assertFalse(desktop.acquire_windows_instance())
+        kernel.CloseHandle.assert_called_once_with(123)
+
     def test_second_launch_attaches_without_starting_a_duplicate_scheduler(self):
         response = io.BytesIO(json.dumps([]).encode())
         with patch('desktop.LocalHTTPServer', side_effect=OSError('port already in use')):
