@@ -176,6 +176,8 @@ header{
 .text-button:hover{text-decoration:underline}
 
 .content{width:100%;max-width:1400px;padding:36px 38px 54px;flex:1}
+.notice{margin:0 0 16px;padding:11px 14px;border:1px solid #7b5831;border-radius:8px;background:#2b2117;color:#f0c18a;font-size:11px;line-height:1.5}
+:root[data-theme='light'] .notice{background:#fff4e4;color:#7e4d13}
 .page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:24px}
 .page-heading>div{min-width:0}
 .eyebrow{display:flex;align-items:center;gap:6px;font-size:8.5px;letter-spacing:.16em;color:var(--muted);text-transform:uppercase}

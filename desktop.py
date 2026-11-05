@@ -1,36 +1,53 @@
 #!/usr/bin/python3
 """Launch the bundled app in the platform's native webview window."""
 import os
+import json
 import threading
 import time
-from http.server import ThreadingHTTPServer
+from urllib.request import urlopen
 
-from server import Handler, notification_loop
+from server import Handler, LocalHTTPServer, notification_loop
 
-try:
-    service = ThreadingHTTPServer(('127.0.0.1', 8765), Handler)
-    threading.Thread(target=service.serve_forever, daemon=True).start()
+service = None
+
+def start_or_attach_service():
+    """Start one local API/scheduler, or attach to an existing CHRONYX one."""
+    try:
+        local_service = LocalHTTPServer(('127.0.0.1', 8765), Handler)
+    except OSError as error:
+        try:
+            with urlopen('http://127.0.0.1:8765/api/events', timeout=1) as response:
+                payload = json.load(response)
+        except Exception as probe_error:
+            raise RuntimeError(
+                'Could not start CHRONYX because port 8765 is occupied by another service.'
+            ) from probe_error
+        if not isinstance(payload, list):
+            raise RuntimeError('The process on port 8765 is not a CHRONYX service.') from error
+        return None
+    threading.Thread(target=local_service.serve_forever, daemon=True).start()
     threading.Thread(target=notification_loop, daemon=True).start()
-except OSError:
-    # A prior VANTA instance already owns the loopback service.
-    service = None
+    return local_service
 
 
 def stop_service():
+    global service
     if service:
-        service.shutdown()
-        service.server_close()
+        current_service = service
+        service = None
+        current_service.shutdown()
+        current_service.server_close()
 
 
 def run_windows():
     # pywebview uses the installed Microsoft Edge WebView2 runtime on Windows.
-    import webview
-    webview.create_window(
-        'VANTA — Competition Tracker',
-        f'http://127.0.0.1:8765/?v={time.time_ns()}',
-        width=1360, height=900, min_size=(800, 600),
-    )
     try:
+        import webview
+        webview.create_window(
+            'VANTA — Competition Tracker',
+            f'http://127.0.0.1:8765/?v={time.time_ns()}',
+            width=1360, height=900, min_size=(800, 600),
+        )
         webview.start()
     finally:
         stop_service()
@@ -69,8 +86,20 @@ def run_linux():
     raise SystemExit(Vanta().run(None))
 
 
+def main():
+    global service
+    try:
+        service = start_or_attach_service()
+    except RuntimeError as error:
+        raise SystemExit(str(error)) from error
+    try:
+        if os.name == 'nt':
+            run_windows()
+        else:
+            run_linux()
+    finally:
+        stop_service()
+
+
 if __name__ == '__main__':
-    if os.name == 'nt':
-        run_windows()
-    else:
-        run_linux()
+    main()

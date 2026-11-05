@@ -1,6 +1,6 @@
 Name:           vanta
 Version:        1.0.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        Local competition tracker
 License:        MIT
 BuildArch:      noarch
@@ -8,6 +8,8 @@ Requires:       python3
 Requires:       gtk3
 Requires:       webkit2gtk4.1
 Requires:       python3-gobject
+Requires:       libnotify
+Requires:       tzdata
 Source0:        %{name}-%{version}.tar.gz
 
 %description
@@ -34,6 +36,10 @@ cp public/vanta.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/vanta.sv
 %{_datadir}/icons/hicolor/scalable/apps/vanta.svg
 
 %changelog
+* Thu Nov 05 2026 VANTA Team <local@localhost> - 1.0.0-7
+- Require libnotify for Fedora desktop reminders
+- Add reminder delivery retries, API validation, and Windows uninstall support
+
 * Thu Nov 05 2026 VANTA Team <local@localhost> - 1.0.0-6
 - Add persistent device-local profile pictures
 

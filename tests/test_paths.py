@@ -14,6 +14,9 @@ class DataDirectoryTest(unittest.TestCase):
     def test_linux_defaults_to_local_share(self):
         self.assertEqual(data_directory('posix',{},'/home/test'),Path('/home/test/.local/share/vanta'))
 
+    def test_linux_ignores_relative_xdg_path(self):
+        self.assertEqual(data_directory('posix',{'XDG_DATA_HOME':'relative'},'/home/test'),Path('/home/test/.local/share/vanta'))
+
     def test_windows_uses_appdata(self):
         self.assertEqual(data_directory('nt',{'APPDATA':'/tmp/appdata'},'/home/test'),Path('/tmp/appdata/VANTA'))
 
