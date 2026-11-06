@@ -2,7 +2,18 @@
 
 Notable user-facing changes are recorded here.
 
-## Unreleased
+## Unreleased (1.0.0-9)
+
+### Renamed to CHRONYX
+
+- The application, command (`chronyx`), RPM package, desktop entry, icon, Windows install folder and Start menu shortcuts are now all named CHRONYX; the project previously shipped as VANTA.
+- New icon: a countdown ring and hand.
+- Existing data is carried over automatically. On first launch the database is copied from the old `vanta` (Linux) or `VANTA` (Windows) data folder into the new `chronyx`/`CHRONYX` folder. The old folder is never modified or deleted, and the copy happens only once.
+- Browser-stored settings (profile picture, offline queue, reminder cache) move to their new keys automatically.
+- The Fedora RPM obsoletes and provides `vanta`, so `dnf` replaces the old package. Both installers remove the old VANTA install files.
+- Exports are now named `chronyx-competitions.json` / `.csv`.
+
+### Other changes
 
 - Catch up only on reminder windows that opened while the app was closed; events added, imported, or edited inside an open window no longer fire an instant toast.
 - Show the actual time remaining in reminder notifications instead of the window name.
