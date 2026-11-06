@@ -10,6 +10,9 @@ Notable user-facing changes are recorded here.
 - Save JSON/CSV exports to the Downloads folder in the Linux shell (no overwrite, with a confirmation dialog) and enable pywebview downloads on Windows.
 - Fix notification pruning for event IDs that contain colons.
 - Run the test suite before building a tagged release.
+- Add ESLint, Prettier and strict TypeScript; remove unused imports and every `any` from the interface code; run them in CI and before releases.
+- Discard offline changes the service permanently rejects (HTTP 400/409/413/422) with a visible notice instead of letting one bad change block all later syncs; saving an event that was deleted elsewhere now recreates it.
+- Show a message when a Website or Register link cannot be opened.
 
 ## 1.0.0-8 — 2026-11-05
 
