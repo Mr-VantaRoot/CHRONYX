@@ -108,7 +108,7 @@ def run_windows():
         if isinstance(settings, dict):
             settings['ALLOW_DOWNLOADS'] = True
         webview.create_window(
-            'VANTA — Competition Tracker',
+            'CHRONYX — Competition Tracker',
             f'http://127.0.0.1:8765/?v={time.time_ns()}',
             width=1360, height=900, min_size=(800, 600),
         )
@@ -130,9 +130,9 @@ def run_linux():
     require_version('WebKit2', '4.1')
     from gi.repository import GLib, Gtk, WebKit2
 
-    class Vanta(Gtk.Application):
+    class Chronyx(Gtk.Application):
         def __init__(self):
-            super().__init__(application_id='io.vanta.CompetitionTracker')
+            super().__init__(application_id='io.chronyx.CompetitionTracker')
             self.window = None
             self.downloads = {}
 
@@ -170,10 +170,10 @@ def run_linux():
             if self.window:
                 self.window.present()
                 return
-            self.window = Gtk.ApplicationWindow(application=self, title='VANTA — Competition Tracker')
+            self.window = Gtk.ApplicationWindow(application=self, title='CHRONYX — Competition Tracker')
             self.window.set_default_size(1360, 900)
             self.window.set_size_request(800, 600)
-            self.window.set_icon_from_file(os.path.join(os.path.dirname(__file__), 'public', 'vanta.svg'))
+            self.window.set_icon_from_file(os.path.join(os.path.dirname(__file__), 'public', 'chronyx.svg'))
             view = WebKit2.WebView()
             view.set_vexpand(True)
             view.set_hexpand(True)
@@ -186,7 +186,7 @@ def run_linux():
             stop_service()
             Gtk.Application.do_shutdown(self)
 
-    raise SystemExit(Vanta().run(None))
+    raise SystemExit(Chronyx().run(None))
 
 
 def main():

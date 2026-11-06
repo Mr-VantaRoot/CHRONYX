@@ -35,15 +35,15 @@ const jsonResponse = (body, status = 200) =>
 
 test('failed local HTTP response is reported and does not masquerade as an offline save', async () => {
   const values = useMemoryStorage();
-  values.set('vantaEvents', JSON.stringify([event()]));
+  values.set('chronyxEvents', JSON.stringify([event()]));
   globalThis.fetch = async () => jsonResponse({error: 'Invalid competition'}, 400);
   await assert.rejects(saveEvent({...event(), name: 'Changed'}, true), (error) => {
     assert.ok(error instanceof ApiError);
     assert.equal(error.status, 400);
     return true;
   });
-  assert.deepEqual(JSON.parse(values.get('vantaEvents')), [event()]);
-  assert.equal(values.has('vantaEventOutbox'), false);
+  assert.deepEqual(JSON.parse(values.get('chronyxEvents')), [event()]);
+  assert.equal(values.has('chronyxEventOutbox'), false);
 });
 
 test('network-failed saves persist locally and synchronize when service returns', async () => {
@@ -54,7 +54,7 @@ test('network-failed saves persist locally and synchronize when service returns'
   const saved = await saveEvent(event(), false);
   assert.equal(saved.offline, true);
   assert.deepEqual(saved.events, [event()]);
-  assert.equal(JSON.parse(values.get('vantaEventOutbox')).length, 1);
+  assert.equal(JSON.parse(values.get('chronyxEventOutbox')).length, 1);
 
   const requests = [];
   globalThis.fetch = async (url, options = {}) => {
@@ -70,8 +70,8 @@ test('network-failed saves persist locally and synchronize when service returns'
     ['/api/events', 'GET'],
     ['/api/events', 'PUT'],
   ]);
-  assert.deepEqual(JSON.parse(values.get('vantaEvents')), [event()]);
-  assert.deepEqual(JSON.parse(values.get('vantaEventOutbox')), []);
+  assert.deepEqual(JSON.parse(values.get('chronyxEvents')), [event()]);
+  assert.deepEqual(JSON.parse(values.get('chronyxEventOutbox')), []);
 });
 
 test('queued saves use POST when the event no longer exists on the server', async () => {
@@ -98,12 +98,12 @@ test('queued saves use POST when the event no longer exists on the server', asyn
     ['/api/events', 'PUT'],
     ['/api/events', 'POST'],
   ]);
-  assert.deepEqual(JSON.parse(values.get('vantaEventOutbox')), []);
+  assert.deepEqual(JSON.parse(values.get('chronyxEventOutbox')), []);
 });
 
 test('network-failed deletions are queued and stay deleted after synchronization', async () => {
   const values = useMemoryStorage();
-  values.set('vantaEvents', JSON.stringify([event()]));
+  values.set('chronyxEvents', JSON.stringify([event()]));
   globalThis.fetch = async () => {
     throw new TypeError('service offline');
   };
@@ -124,15 +124,15 @@ test('network-failed deletions are queued and stay deleted after synchronization
     ['/api/events', 'GET'],
     ['/api/events/evt-1', 'DELETE'],
   ]);
-  assert.deepEqual(JSON.parse(values.get('vantaEventOutbox')), []);
+  assert.deepEqual(JSON.parse(values.get('chronyxEventOutbox')), []);
 });
 
 test('malformed remote data is rejected instead of clearing the cached data', async () => {
   const values = useMemoryStorage();
-  values.set('vantaEvents', JSON.stringify([event()]));
+  values.set('chronyxEvents', JSON.stringify([event()]));
   globalThis.fetch = async () => jsonResponse([{name: 'missing id'}]);
   await assert.rejects(loadEvents(), /malformed competition data/);
-  assert.deepEqual(JSON.parse(values.get('vantaEvents')), [event()]);
+  assert.deepEqual(JSON.parse(values.get('chronyxEvents')), [event()]);
 });
 
 test('reminder preferences queue offline and sync on next read', async () => {
@@ -142,7 +142,7 @@ test('reminder preferences queue offline and sync on next read', async () => {
   };
   const first = await saveReminderSettings({'7d': false, '3d': true, '1d': false, '1h': true, customHours: 12});
   assert.equal(first.offline, true);
-  assert.equal(JSON.parse(values.get('vantaReminderOutbox')).customHours, 12);
+  assert.equal(JSON.parse(values.get('chronyxReminderOutbox')).customHours, 12);
 
   const seen = [];
   globalThis.fetch = async (url, options = {}) => {
@@ -158,11 +158,11 @@ test('reminder preferences queue offline and sync on next read', async () => {
     ['/api/settings', 'GET'],
     ['/api/settings', 'PATCH'],
   ]);
-  assert.equal(values.has('vantaReminderOutbox'), false);
+  assert.equal(values.has('chronyxReminderOutbox'), false);
 });
 
 test('invalid server response errors are not masked by local settings', async () => {
-  useMemoryStorage().set('vantaReminders', JSON.stringify({'7d': true}));
+  useMemoryStorage().set('chronyxReminders', JSON.stringify({'7d': true}));
   globalThis.fetch = async () => jsonResponse({error: 'Invalid value'}, 400);
   await assert.rejects(
     saveReminderSettings({'7d': false}),
@@ -190,7 +190,7 @@ test('invalid batch import response is rejected', async () => {
 test('a permanently rejected queued change is discarded and does not block the changes behind it', async () => {
   const values = useMemoryStorage();
   values.set(
-    'vantaEventOutbox',
+    'chronyxEventOutbox',
     JSON.stringify([
       {type: 'save', id: 'bad', event: {...event('bad'), name: 'Broken'}},
       {type: 'save', id: 'good', event: event('good')},
@@ -212,9 +212,9 @@ test('a permanently rejected queued change is discarded and does not block the c
     loaded.events.map((item) => item.id),
     ['good'],
   );
-  assert.deepEqual(JSON.parse(values.get('vantaEventOutbox')), []);
+  assert.deepEqual(JSON.parse(values.get('chronyxEventOutbox')), []);
   assert.deepEqual(
-    JSON.parse(values.get('vantaEvents')).map((item) => item.id),
+    JSON.parse(values.get('chronyxEvents')).map((item) => item.id),
     ['good'],
   );
   assert.deepEqual(requests, ['GET /api/events', 'PUT /api/events', 'PUT /api/events']);
@@ -222,7 +222,7 @@ test('a permanently rejected queued change is discarded and does not block the c
 
 test('temporary server errors keep queued changes so they are retried', async () => {
   const values = useMemoryStorage();
-  values.set('vantaEventOutbox', JSON.stringify([{type: 'save', id: 'evt-1', event: event()}]));
+  values.set('chronyxEventOutbox', JSON.stringify([{type: 'save', id: 'evt-1', event: event()}]));
   globalThis.fetch = async (url, options = {}) => {
     if (!options.method) return jsonResponse([]);
     return jsonResponse({error: 'database is locked'}, 500);
@@ -230,7 +230,7 @@ test('temporary server errors keep queued changes so they are retried', async ()
   const loaded = await loadEvents();
   assert.match(loaded.syncError, /database is locked/);
   assert.deepEqual(loaded.rejected, []);
-  assert.equal(JSON.parse(values.get('vantaEventOutbox')).length, 1);
+  assert.equal(JSON.parse(values.get('chronyxEventOutbox')).length, 1);
   assert.deepEqual(
     loaded.events.map((item) => item.id),
     ['evt-1'],
@@ -239,17 +239,17 @@ test('temporary server errors keep queued changes so they are retried', async ()
 
 test('a forbidden response is kept queued because it is fixable, not a bad change', async () => {
   const values = useMemoryStorage();
-  values.set('vantaEventOutbox', JSON.stringify([{type: 'save', id: 'evt-1', event: event()}]));
+  values.set('chronyxEventOutbox', JSON.stringify([{type: 'save', id: 'evt-1', event: event()}]));
   globalThis.fetch = async (url, options = {}) =>
     options.method ? jsonResponse({error: 'Forbidden origin'}, 403) : jsonResponse([]);
   const loaded = await loadEvents();
   assert.deepEqual(loaded.rejected, []);
-  assert.equal(JSON.parse(values.get('vantaEventOutbox')).length, 1);
+  assert.equal(JSON.parse(values.get('chronyxEventOutbox')).length, 1);
 });
 
 test('a queued change that cannot be recreated after a 404 is discarded with its reason', async () => {
   const values = useMemoryStorage();
-  values.set('vantaEventOutbox', JSON.stringify([{type: 'save', id: 'evt-1', event: event()}]));
+  values.set('chronyxEventOutbox', JSON.stringify([{type: 'save', id: 'evt-1', event: event()}]));
   globalThis.fetch = async (url, options = {}) => {
     if (!options.method) return jsonResponse([]);
     if (options.method === 'PUT') return jsonResponse({error: 'Competition not found'}, 404);
@@ -258,7 +258,7 @@ test('a queued change that cannot be recreated after a 404 is discarded with its
   const loaded = await loadEvents();
   assert.equal(loaded.rejected.length, 1);
   assert.equal(loaded.rejected[0].reason, 'Competition already exists');
-  assert.deepEqual(JSON.parse(values.get('vantaEventOutbox')), []);
+  assert.deepEqual(JSON.parse(values.get('chronyxEventOutbox')), []);
   assert.deepEqual(loaded.events, []);
 });
 

@@ -122,7 +122,7 @@ export function Dashboard({
           <div>
             <span className="section-tag">ALL CLEAR</span>
             <h2>No upcoming competitions yet</h2>
-            <p>Add your next opportunity and VANTA will keep the countdown.</p>
+            <p>Add your next opportunity and CHRONYX will keep the countdown.</p>
           </div>
           <button className="add-button" onClick={() => open()}>
             <Plus size={16} /> Add competition

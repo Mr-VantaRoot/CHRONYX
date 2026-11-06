@@ -51,9 +51,9 @@ jobs:
           npm run build
           mkdir -p "$RUNNER_TEMP/rpmbuild/SOURCES"
           tar --exclude='node_modules' --exclude='.git' --exclude='__pycache__' \
-            --exclude='.venv' --exclude='*.rpm' --transform='s,^,vanta-1.0.0/,' \
-            -czf "$RUNNER_TEMP/rpmbuild/SOURCES/vanta-1.0.0.tar.gz" .
-          rpmbuild -bb --define "_topdir $RUNNER_TEMP/rpmbuild" --define 'dist .fc44' packaging/vanta.spec
+            --exclude='.venv' --exclude='*.rpm' --transform='s,^,chronyx-1.0.0/,' \
+            -czf "$RUNNER_TEMP/rpmbuild/SOURCES/chronyx-1.0.0.tar.gz" .
+          rpmbuild -bb --define "_topdir $RUNNER_TEMP/rpmbuild" --define 'dist .fc44' packaging/chronyx.spec
           cp "$RUNNER_TEMP"/rpmbuild/RPMS/noarch/*.rpm .
           sha256sum ./*.rpm > SHA256SUMS
       - name: Publish RPM and checksums to the GitHub Release

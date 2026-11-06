@@ -77,7 +77,7 @@ function App() {
     [filterPriority, setFilterPriority] = useState('All'),
     [sortBy, setSortBy] = useState('start'),
     [theme, setTheme] = useState(readLocal('theme', 'dark')),
-    [profilePicture, setProfilePicture] = useState(readLocal('vantaProfilePicture')),
+    [profilePicture, setProfilePicture] = useState(readLocal('chronyxProfilePicture')),
     [tick, setTick] = useState(Date.now()),
     [month, setMonth] = useState(new Date()),
     [menu, setMenu] = useState(''),
@@ -220,7 +220,7 @@ function App() {
   async function exportData(kind: 'json' | 'csv') {
     const anchor = document.createElement('a');
     anchor.href = `/api/export.${kind}`;
-    anchor.download = `vanta-competitions.${kind}`;
+    anchor.download = `chronyx-competitions.${kind}`;
     anchor.style.display = 'none';
     document.body.appendChild(anchor);
     anchor.click();
@@ -261,7 +261,7 @@ function App() {
             <Shield size={19} />
           </div>
           <div>
-            <b>VANTA</b>
+            <b>CHRONYX</b>
             <small>COMPETITION TRACKER</small>
           </div>
         </div>
