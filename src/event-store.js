@@ -11,6 +11,17 @@ export class ApiError extends Error {
   }
 }
 
+// Statuses meaning the server will never accept this exact change, so retrying forever would
+// block every change queued behind it. 403/5xx stay queued: those are fixable or temporary.
+const PERMANENT_REJECTIONS = new Set([400, 409, 413, 422]);
+const isPermanentRejection = (error) => error instanceof ApiError && PERMANENT_REJECTIONS.has(error.status);
+const describeRejection = (op, error) => ({
+  id: op.id,
+  type: op.type,
+  name: op.event?.name || op.id,
+  reason: error.message,
+});
+
 function storage() {
   return globalThis.localStorage;
 }
@@ -21,16 +32,21 @@ function cachedEvents() {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) throw new Error('Saved competition cache is malformed');
-    return parsed.filter(item => item && typeof item.id === 'string' && typeof item.name === 'string');
+    return parsed.filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string');
   } catch (error) {
-    if (error instanceof SyntaxError) throw new ApiError('Saved competition cache is damaged. Use your JSON backup to restore it.');
+    if (error instanceof SyntaxError)
+      throw new ApiError('Saved competition cache is damaged. Use your JSON backup to restore it.');
     throw error;
   }
 }
 
 function bestEffortCachedEvents() {
-  try { return cachedEvents(); }
-  catch (error) { console.error('Ignoring unreadable local competition cache:', error); return []; }
+  try {
+    return cachedEvents();
+  } catch (error) {
+    console.error('Ignoring unreadable local competition cache:', error);
+    return [];
+  }
 }
 
 function outbox() {
@@ -39,16 +55,20 @@ function outbox() {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) throw new Error('Saved offline changes are malformed');
-    return parsed.filter(op => op && typeof op.id === 'string' && ['save', 'delete'].includes(op.type));
+    return parsed.filter((op) => op && typeof op.id === 'string' && ['save', 'delete'].includes(op.type));
   } catch (error) {
-    if (error instanceof SyntaxError) throw new ApiError('Saved offline changes are damaged. Export available events before continuing.');
+    if (error instanceof SyntaxError)
+      throw new ApiError('Saved offline changes are damaged. Export available events before continuing.');
     throw error;
   }
 }
 
 function writeCache(events) {
-  try { storage()?.setItem(EVENTS_KEY, JSON.stringify(events)); }
-  catch (error) { console.error('Could not update the local competition cache:', error); }
+  try {
+    storage()?.setItem(EVENTS_KEY, JSON.stringify(events));
+  } catch (error) {
+    console.error('Could not update the local competition cache:', error);
+  }
 }
 
 function writeOutbox(operations) {
@@ -56,12 +76,13 @@ function writeOutbox(operations) {
     const store = storage();
     if (!store) throw new Error('Browser storage is unavailable');
     store.setItem(OUTBOX_KEY, JSON.stringify(operations));
+  } catch {
+    throw new ApiError('Offline changes could not be saved in browser storage. Free some storage space and retry.');
   }
-  catch { throw new ApiError('Offline changes could not be saved in browser storage. Free some storage space and retry.'); }
 }
 
 function overlay(events, operations) {
-  const byId = new Map(events.map(event => [event.id, event]));
+  const byId = new Map(events.map((event) => [event.id, event]));
   for (const op of operations) {
     if (op.type === 'delete') byId.delete(op.id);
     else byId.set(op.id, op.event);
@@ -78,99 +99,135 @@ async function requestJson(path, options = {}) {
     throw new ApiError('The local data service could not be reached.');
   }
   let result;
-  try { result = await response.json(); }
-  catch { throw new ApiError('The local data service returned an invalid response.', response.status); }
-  if (!response.ok) throw new ApiError(result?.error || `The local data service returned HTTP ${response.status}.`, response.status);
+  try {
+    result = await response.json();
+  } catch {
+    throw new ApiError('The local data service returned an invalid response.', response.status);
+  }
+  if (!response.ok)
+    throw new ApiError(result?.error || `The local data service returned HTTP ${response.status}.`, response.status);
   return result;
 }
 
+const jsonOptions = (method, body) => ({
+  method,
+  headers: {'content-type': 'application/json'},
+  body: JSON.stringify(body),
+});
+
 async function syncOutbox(remoteEvents, operations) {
   const remaining = [...operations];
+  const applied = [];
+  const rejected = [];
   for (const op of operations) {
     const path = op.type === 'delete' ? `/api/events/${encodeURIComponent(op.id)}` : '/api/events';
-    const options = op.type === 'delete'
-      ? { method: 'DELETE' }
-      : { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(op.event) };
+    const options = op.type === 'delete' ? {method: 'DELETE'} : jsonOptions('PUT', op.event);
     try {
       await requestJson(path, options);
+      applied.push(op);
     } catch (error) {
-      // Deleting an already-absent row has the same final state.
       if (op.type === 'save' && error instanceof ApiError && error.status === 404) {
-        await requestJson('/api/events', {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(op.event),
-        });
-      } else if (!(op.type === 'delete' && error instanceof ApiError && error.status === 404)) {
+        // The row no longer exists on the server, so recreate it.
+        try {
+          await requestJson('/api/events', jsonOptions('POST', op.event));
+          applied.push(op);
+        } catch (createError) {
+          if (!isPermanentRejection(createError)) throw createError;
+          rejected.push(describeRejection(op, createError));
+        }
+      } else if (op.type === 'delete' && error instanceof ApiError && error.status === 404) {
+        applied.push(op); // Deleting an already-absent row has the same final state.
+      } else if (isPermanentRejection(error)) {
+        rejected.push(describeRejection(op, error));
+      } else {
         throw error;
       }
     }
     remaining.shift();
     writeOutbox(remaining);
   }
-  const merged = overlay(remoteEvents, operations);
+  const merged = overlay(remoteEvents, applied);
   writeCache(merged);
-  return merged;
+  return {events: merged, rejected};
 }
 
 export async function loadEvents() {
   try {
     const remote = await requestJson('/api/events');
-    if (!Array.isArray(remote) || remote.some(item => !item || typeof item.id !== 'string' || typeof item.name !== 'string')) {
+    if (
+      !Array.isArray(remote) ||
+      remote.some((item) => !item || typeof item.id !== 'string' || typeof item.name !== 'string')
+    ) {
       throw new ApiError('The local data service returned malformed competition data.');
     }
     const operations = outbox();
     let synchronized = remote;
     let syncError = '';
+    let rejected = [];
     if (operations.length) {
-      try { synchronized = await syncOutbox(remote, operations); }
-      catch (error) {
+      try {
+        const outcome = await syncOutbox(remote, operations);
+        synchronized = outcome.events;
+        rejected = outcome.rejected;
+      } catch (error) {
         if (error instanceof TypeError) throw error;
         syncError = error instanceof Error ? error.message : 'Offline changes could not be synchronized.';
         synchronized = overlay(remote, outbox());
       }
     }
     writeCache(synchronized);
-    return { events: synchronized, offline: false, syncError };
+    return {events: synchronized, offline: false, syncError, rejected};
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
     const operations = outbox();
     const events = overlay(cachedEvents(), operations);
-    return { events, offline: true };
+    return {events, offline: true};
+  }
+}
+
+async function writeEvent(event, existing) {
+  if (!existing) return requestJson('/api/events', jsonOptions('POST', event));
+  try {
+    return await requestJson('/api/events', jsonOptions('PUT', event));
+  } catch (error) {
+    // Deleted elsewhere (another window, an import): saving again should recreate it, not fail.
+    if (error instanceof ApiError && error.status === 404)
+      return requestJson('/api/events', jsonOptions('POST', event));
+    throw error;
   }
 }
 
 export async function saveEvent(event, existing) {
-  const method = existing ? 'PUT' : 'POST';
-  const options = { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(event) };
   try {
-    const saved = await requestJson('/api/events', options);
-    const events = overlay(bestEffortCachedEvents(), [{ type: 'save', id: saved.id, event: saved }]);
+    const saved = await writeEvent(event, existing);
+    const events = overlay(bestEffortCachedEvents(), [{type: 'save', id: saved.id, event: saved}]);
     writeCache(events);
-    return { events, offline: false };
+    return {events, offline: false};
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
-    const events = overlay(cachedEvents(), [{ type: 'save', id: event.id, event }]);
-    const operations = outbox().filter(op => op.id !== event.id);
-    operations.push({ type: 'save', id: event.id, event });
+    const events = overlay(cachedEvents(), [{type: 'save', id: event.id, event}]);
+    const operations = outbox().filter((op) => op.id !== event.id);
+    operations.push({type: 'save', id: event.id, event});
     writeOutbox(operations);
     writeCache(events);
-    return { events, offline: true };
+    return {events, offline: true};
   }
 }
 
 export async function deleteEvent(id) {
   try {
-    await requestJson(`/api/events/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    const events = bestEffortCachedEvents().filter(event => event.id !== id);
+    await requestJson(`/api/events/${encodeURIComponent(id)}`, {method: 'DELETE'});
+    const events = bestEffortCachedEvents().filter((event) => event.id !== id);
     writeCache(events);
-    return { events, offline: false };
+    return {events, offline: false};
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
-    const events = cachedEvents().filter(event => event.id !== id);
-    const operations = outbox().filter(op => op.id !== id);
-    operations.push({ type: 'delete', id });
+    const events = cachedEvents().filter((event) => event.id !== id);
+    const operations = outbox().filter((op) => op.id !== id);
+    operations.push({type: 'delete', id});
     writeOutbox(operations);
     writeCache(events);
-    return { events, offline: true };
+    return {events, offline: true};
   }
 }
 
@@ -183,7 +240,7 @@ export async function importEvents(events, indices) {
   if (!Number.isInteger(result?.imported) || result.imported < 0 || !Array.isArray(result.skipped)) {
     throw new ApiError('The local data service returned an invalid import report.');
   }
-  if (result.skipped.some(item => !Number.isInteger(item?.index) || typeof item?.reason !== 'string')) {
+  if (result.skipped.some((item) => !Number.isInteger(item?.index) || typeof item?.reason !== 'string')) {
     throw new ApiError('The local data service returned malformed import errors.');
   }
   return result;
@@ -200,14 +257,16 @@ function reminderCache() {
 }
 
 function validateReminders(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError('The local data service returned malformed reminder preferences.');
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new ApiError('The local data service returned malformed reminder preferences.');
   const result = {};
   for (const key of ['7d', '3d', '1d', '1h']) {
     if (key in value && typeof value[key] !== 'boolean') throw new ApiError(`Reminder setting ${key} is invalid.`);
     if (key in value) result[key] = value[key];
   }
   if ('customHours' in value) {
-    if (!Number.isInteger(value.customHours) || value.customHours < 0 || value.customHours > 8760) throw new ApiError('Custom reminder hours are invalid.');
+    if (!Number.isInteger(value.customHours) || value.customHours < 0 || value.customHours > 8760)
+      throw new ApiError('Custom reminder hours are invalid.');
     result.customHours = value.customHours;
   }
   return result;
@@ -219,9 +278,13 @@ export async function loadReminderSettings() {
     const pending = storage()?.getItem(REMINDERS_OUTBOX_KEY);
     if (pending) {
       const local = validateReminders(JSON.parse(pending));
-      const synced = validateReminders(await requestJson('/api/settings', {
-        method: 'PATCH', headers: {'content-type': 'application/json'}, body: JSON.stringify(local),
-      }));
+      const synced = validateReminders(
+        await requestJson('/api/settings', {
+          method: 'PATCH',
+          headers: {'content-type': 'application/json'},
+          body: JSON.stringify(local),
+        }),
+      );
       storage()?.removeItem(REMINDERS_OUTBOX_KEY);
       storage()?.setItem(REMINDERS_KEY, JSON.stringify(synced));
       return {settings: synced, offline: false};
@@ -239,11 +302,23 @@ let reminderWriteQueue = Promise.resolve();
 async function performSaveReminderSettings(settings) {
   const clean = validateReminders(settings);
   try {
-    const saved = validateReminders(await requestJson('/api/settings', {
-      method: 'PATCH', headers: {'content-type': 'application/json'}, body: JSON.stringify(clean),
-    }));
-    try { storage()?.setItem(REMINDERS_KEY, JSON.stringify(saved)); } catch (error) { console.error('Could not update reminder cache:', error); }
-    try { storage()?.removeItem(REMINDERS_OUTBOX_KEY); } catch (error) { console.error('Could not clear reminder outbox:', error); }
+    const saved = validateReminders(
+      await requestJson('/api/settings', {
+        method: 'PATCH',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify(clean),
+      }),
+    );
+    try {
+      storage()?.setItem(REMINDERS_KEY, JSON.stringify(saved));
+    } catch (error) {
+      console.error('Could not update reminder cache:', error);
+    }
+    try {
+      storage()?.removeItem(REMINDERS_OUTBOX_KEY);
+    } catch (error) {
+      console.error('Could not clear reminder outbox:', error);
+    }
     return {settings: saved, offline: false};
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
@@ -252,8 +327,9 @@ async function performSaveReminderSettings(settings) {
       if (!store) throw new Error('Browser storage is unavailable');
       store.setItem(REMINDERS_KEY, JSON.stringify(clean));
       store.setItem(REMINDERS_OUTBOX_KEY, JSON.stringify(clean));
+    } catch {
+      throw new ApiError('Reminder changes could not be queued in local storage.');
     }
-    catch { throw new ApiError('Reminder changes could not be queued in local storage.'); }
     return {settings: clean, offline: true};
   }
 }

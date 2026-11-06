@@ -1,9 +1,7 @@
 import {countdown} from './time.js';
 
 export function eventCountdown(event, now = Date.now()) {
-  return event.status === 'Completed' || event.status === 'Cancelled'
-    ? event.status
-    : countdown(event.start, now);
+  return event.status === 'Completed' || event.status === 'Cancelled' ? event.status : countdown(event.start, now);
 }
 
 export function deadlineCountdown(event, now = Date.now()) {

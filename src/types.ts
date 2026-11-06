@@ -15,3 +15,22 @@ export type Event = {
   notes: string;
   created: string;
 };
+
+export type ReminderPrefs = {
+  '7d': boolean;
+  '3d': boolean;
+  '1d': boolean;
+  '1h': boolean;
+  customHours: number;
+};
+
+export type CalendarItem = {event: Event; kind: string; dayKey?: string};
+
+export type SkippedRow = {index: number; reason: string; name?: string};
+
+export type ImportReportData = {
+  title: string;
+  imported: number;
+  skipped: SkippedRow[];
+  message?: string;
+};

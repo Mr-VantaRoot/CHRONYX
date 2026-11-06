@@ -178,11 +178,13 @@ npm run build
 npm test
 python3 -m unittest discover -s tests -v
 npm run typecheck
+npm run lint
+npm run format:check
 python3 -m py_compile server.py desktop.py
 sh -n install-user.sh uninstall-user.sh
 ```
 
-The production UI is written to `dist/`. Tests cover countdowns, DST gaps/folds and calendar timezone keys; SQLite CRUD and schema migration; notification failures, retries, deduplication and rescheduling; HTTP input/origin validation; offline save/delete synchronization; and data paths. `desktop.py` runs on Fedora with GTK/WebKitGTK installed or on Windows with WebView2 and the Windows requirements installed. Native desktop testing is still required on Windows, Ubuntu, and Kali.
+The production UI is written to `dist/`. Run `npm run format` to apply Prettier; TypeScript runs in strict mode and ESLint forbids explicit `any`. Tests cover countdowns, DST gaps/folds and calendar timezone keys; SQLite CRUD and schema migration; notification failures, retries, deduplication and rescheduling; HTTP input/origin validation; offline save/delete synchronization; and data paths. `desktop.py` runs on Fedora with GTK/WebKitGTK installed or on Windows with WebView2 and the Windows requirements installed. Native desktop testing is still required on Windows, Ubuntu, and Kali.
 
 ### Build the Fedora RPM
 

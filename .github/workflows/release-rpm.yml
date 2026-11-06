@@ -27,6 +27,8 @@ jobs:
           python -m unittest discover -s tests -v
           npm test
           npm run typecheck
+          npm run lint
+          npm run format:check
           npm run build
           git diff --exit-code dist
 
