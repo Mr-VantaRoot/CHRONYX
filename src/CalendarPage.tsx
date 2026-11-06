@@ -39,29 +39,32 @@ export function CalendarPage({events, month, setMonth, open}: CalendarPageProps)
       day: 'numeric',
     });
   };
-  const marker = (item: CalendarItem, key: string, compact = false) => {
+  const categoryTag = (category: string) => {
+    const tags: Record<string, string> = {
+      CTF: 'CTF',
+      Hackathon: 'HACK',
+      'AI / ML': 'AI',
+      Robotics: 'ROBO',
+      Programming: 'CODE',
+      Scholarship: 'SCH',
+      Technology: 'TECH',
+      Other: 'OTHER',
+    };
+    return tags[category] ?? category.slice(0, 4).toUpperCase();
+  };
+  const marker = (item: CalendarItem, key: string) => {
     const {event, kind} = item;
     const deadline = kind === 'deadline';
-    const startKey = calendarDayKey(event.start, event.timezone);
-    const label = deadline
-      ? 'Deadline'
-      : key === startKey
-        ? fmt(event.start, {
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZone: event.timezone,
-          })
-        : 'Continues';
+    const tag = deadline ? 'DL' : categoryTag(event.category);
     return (
       <button
         key={`${event.id}:${kind}:${key}`}
-        title={`${deadline ? 'Registration deadline' : 'Competition'}: ${event.name}`}
+        title={`${event.name} · ${deadline ? 'Registration deadline' : event.category}`}
+        aria-label={`${deadline ? 'Registration deadline' : event.category}: ${event.name}`}
         className={`calendar-event ${deadline ? 'calendar-deadline' : ''}`}
         onClick={() => open(event)}
       >
-        {deadline ? 'Deadline · ' : !compact ? `${label} · ` : ''}
-        {event.name}
-        {!compact && <small>{deadline ? 'Registration closes' : event.category}</small>}
+        {tag}
       </button>
     );
   };
@@ -143,7 +146,7 @@ export function CalendarPage({events, month, setMonth, open}: CalendarPageProps)
                     key={key}
                   >
                     <span>{d}</span>
-                    {items.map((item) => marker(item, key, true))}
+                    {items.map((item) => marker(item, key))}
                   </div>
                 );
               },
