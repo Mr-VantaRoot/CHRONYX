@@ -10,6 +10,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -41,24 +42,84 @@ ALLOWED_STATUSES = {
 ALLOWED_PRIORITIES = {'Low', 'Medium', 'High', 'Critical'}
 
 
-def data_directory(system=None, environ=None, home=None):
+DB_NAME = 'chronyx.sqlite3'
+LEGACY_DB_NAME = 'vanta.sqlite3'
+MIGRATION_MARKER = '.migrated-from-vanta'
+
+
+def _resolve_environment(system, environ, home):
     system = system or os.name
     environ = os.environ if environ is None else environ
     home = Path.home() if home is None else Path(home)
+    return system, environ, home
+
+
+def _data_parent(system, environ, home):
     if system == 'nt':
         roaming = Path(environ.get('APPDATA') or '')
         if not roaming.is_absolute():
             roaming = home / 'AppData' / 'Roaming'
-        return roaming / 'VANTA'
+        return roaming
     xdg_home = Path(environ.get('XDG_DATA_HOME') or '')
     if not xdg_home.is_absolute():
         xdg_home = home / '.local/share'
-    return xdg_home / 'vanta'
+    return xdg_home
+
+
+def data_directory(system=None, environ=None, home=None):
+    system, environ, home = _resolve_environment(system, environ, home)
+    return _data_parent(system, environ, home) / ('CHRONYX' if system == 'nt' else 'chronyx')
+
+
+def legacy_data_directory(system=None, environ=None, home=None):
+    """Where releases that were named VANTA kept their data."""
+    system, environ, home = _resolve_environment(system, environ, home)
+    return _data_parent(system, environ, home) / ('VANTA' if system == 'nt' else 'vanta')
+
+
+def migrate_legacy_data(data_dir, legacy_dir):
+    """Copy the database of a VANTA-named release into the CHRONYX data folder, once.
+
+    Returns 'migrated', 'skipped' (nothing to do) or 'failed'. The old folder is only
+    read, never changed or deleted, so a failed or unwanted migration is harmless.
+    """
+    data_dir, legacy_dir = Path(data_dir), Path(legacy_dir)
+    marker = data_dir / MIGRATION_MARKER
+    new_db = data_dir / DB_NAME
+    legacy_db = legacy_dir / LEGACY_DB_NAME
+    if marker.exists() or new_db.exists() or not legacy_db.is_file():
+        return 'skipped'
+    temporary = data_dir / f'.{DB_NAME}.migrating'
+    try:
+        temporary.unlink(missing_ok=True)
+        source = sqlite3.connect(legacy_db, timeout=10)
+        try:
+            target = sqlite3.connect(temporary)
+            try:
+                source.backup(target)  # Consistent even if the old file has a write-ahead log.
+            finally:
+                target.close()
+        finally:
+            source.close()
+        os.replace(temporary, new_db)
+        marker.write_text(f'Copied from {legacy_db}\n', encoding='utf-8')
+        print(f'CHRONYX: copied your data from {legacy_db}', file=sys.stderr, flush=True)
+        return 'migrated'
+    except (OSError, sqlite3.Error) as error:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        print(f'CHRONYX: could not copy data from {legacy_db}: {error}', file=sys.stderr, flush=True)
+        return 'failed'
 
 
 DATA = data_directory()
 DATA.mkdir(parents=True, exist_ok=True)
-DB = DATA / 'vanta.sqlite3'
+_LEGACY_DIR = legacy_data_directory()
+MIGRATION_STATUS = migrate_legacy_data(DATA, _LEGACY_DIR)
+# If copying failed, keep using the old database rather than hiding it behind an empty one.
+DB = _LEGACY_DIR / LEGACY_DB_NAME if MIGRATION_STATUS == 'failed' else DATA / DB_NAME
 
 
 def connect(db_path=None):
@@ -436,7 +497,7 @@ class Handler(SimpleHTTPRequestHandler):
                 raw = json.dumps(events(), ensure_ascii=False, indent=2).encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Content-Disposition', 'attachment; filename="vanta-competitions.json"')
+                self.send_header('Content-Disposition', 'attachment; filename="chronyx-competitions.json"')
                 self.send_header('Content-Length', str(len(raw)))
                 self.end_headers()
                 self.wfile.write(raw)
@@ -445,7 +506,7 @@ class Handler(SimpleHTTPRequestHandler):
                 raw = export_csv(events()).encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/csv; charset=utf-8')
-                self.send_header('Content-Disposition', 'attachment; filename="vanta-competitions.csv"')
+                self.send_header('Content-Disposition', 'attachment; filename="chronyx-competitions.csv"')
                 self.send_header('Content-Length', str(len(raw)))
                 self.end_headers()
                 self.wfile.write(raw)

@@ -14,7 +14,7 @@ import desktop
 
 class DownloadHelpersTest(unittest.TestCase):
     def test_suggested_names_are_reduced_to_a_safe_basename(self):
-        self.assertEqual(desktop.safe_download_name('vanta-competitions.json'), 'vanta-competitions.json')
+        self.assertEqual(desktop.safe_download_name('chronyx-competitions.json'), 'chronyx-competitions.json')
         self.assertEqual(desktop.safe_download_name('../../etc/passwd'), 'passwd')
         self.assertEqual(desktop.safe_download_name('..\\..\\evil.csv'), 'evil.csv')
         self.assertEqual(desktop.safe_download_name('a<b>:c.csv'), 'a_b__c.csv')

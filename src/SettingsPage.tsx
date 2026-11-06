@@ -102,7 +102,7 @@ export function SettingsPage({
         ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
         const value = canvas.toDataURL('image/jpeg', 0.82);
         try {
-          localStorage.setItem('vantaProfilePicture', value);
+          localStorage.setItem('chronyxProfilePicture', value);
           setProfilePicture(value);
         } catch {
           setPictureError('Could not save the image. Try a smaller picture.');
@@ -114,7 +114,7 @@ export function SettingsPage({
   }
   function removePicture() {
     try {
-      localStorage.removeItem('vantaProfilePicture');
+      localStorage.removeItem('chronyxProfilePicture');
       setProfilePicture('');
       setPictureError('');
     } catch {
@@ -127,7 +127,7 @@ export function SettingsPage({
         <div>
           <div className="eyebrow">PREFERENCES</div>
           <h1>Settings</h1>
-          <p>Make VANTA work the way you do.</p>
+          <p>Make CHRONYX work the way you do.</p>
         </div>
       </div>
       <div className="settings-wrap">
@@ -198,7 +198,7 @@ export function SettingsPage({
         </section>
         <section className="settings-card">
           <h3>Reminders</h3>
-          <p>Choose when VANTA notifies you about starts and registration deadlines.</p>
+          <p>Choose when CHRONYX notifies you about starts and registration deadlines.</p>
           <div className="reminder-options">
             {reminderWindows.map(([k, x]) => (
               <label key={k}>
@@ -216,12 +216,12 @@ export function SettingsPage({
               onChange={(e) => update('customHours', Math.min(8760, Math.max(0, Number(e.target.value))))}
             />
           </label>
-          <small>Desktop reminders appear while VANTA is running in the background.</small>
+          <small>Desktop reminders appear while CHRONYX is running in the background.</small>
         </section>
         <section className="settings-card">
-          <h3>About VANTA</h3>
+          <h3>About CHRONYX</h3>
           <p>Competition tracking, kept local and private.</p>
-          <span className="version-chip">VANTA · VERSION 1.0.0</span>
+          <span className="version-chip">CHRONYX · VERSION 1.0.0</span>
         </section>
       </div>
     </>

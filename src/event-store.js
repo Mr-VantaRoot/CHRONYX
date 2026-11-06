@@ -1,7 +1,7 @@
-const EVENTS_KEY = 'vantaEvents';
-const OUTBOX_KEY = 'vantaEventOutbox';
-const REMINDERS_KEY = 'vantaReminders';
-const REMINDERS_OUTBOX_KEY = 'vantaReminderOutbox';
+const EVENTS_KEY = 'chronyxEvents';
+const OUTBOX_KEY = 'chronyxEventOutbox';
+const REMINDERS_KEY = 'chronyxReminders';
+const REMINDERS_OUTBOX_KEY = 'chronyxReminderOutbox';
 
 export class ApiError extends Error {
   constructor(message, status = 0) {

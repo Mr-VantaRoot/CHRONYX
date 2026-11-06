@@ -2,12 +2,12 @@
 set -eu
 
 BASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-APPDIR="$HOME/.local/lib/vanta"
+APPDIR="$HOME/.local/lib/chronyx"
 LIBDIR=$(dirname -- "$APPDIR")
 BINDIR="$HOME/.local/bin"
 DATADIR="$HOME/.local/share"
-APP_ENTRY="$DATADIR/applications/vanta.desktop"
-ICON="$DATADIR/icons/hicolor/scalable/apps/vanta.svg"
+APP_ENTRY="$DATADIR/applications/chronyx.desktop"
+ICON="$DATADIR/icons/hicolor/scalable/apps/chronyx.svg"
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo 'Python 3 is required. Install it with your distribution package manager.' >&2
@@ -28,10 +28,10 @@ if ! command -v notify-send >/dev/null 2>&1; then
 fi
 
 mkdir -p "$LIBDIR" "$BINDIR" "$DATADIR/applications" "$DATADIR/icons/hicolor/scalable/apps"
-STAGE=$(mktemp -d "$LIBDIR/.vanta-stage.XXXXXX")
-ARCHIVE=$(mktemp "$LIBDIR/.vanta-source.XXXXXX.tar")
-BACKUP="$LIBDIR/.vanta-backup.$$"
-BIN_TMP="$BINDIR/.vanta.$$"
+STAGE=$(mktemp -d "$LIBDIR/.chronyx-stage.XXXXXX")
+ARCHIVE=$(mktemp "$LIBDIR/.chronyx-source.XXXXXX.tar")
+BACKUP="$LIBDIR/.chronyx-backup.$$"
+BIN_TMP="$BINDIR/.chronyx.$$"
 ENTRY_TMP="$APP_ENTRY.$$"
 ICON_TMP="$ICON.$$"
 OLD_MOVED=0
@@ -53,17 +53,17 @@ tar -C "$STAGE" -xf "$ARCHIVE"
 
 cat > "$BIN_TMP" <<EOF
 #!/bin/sh
-exec "$APPDIR/vanta" "\$@"
+exec "$APPDIR/chronyx" "\$@"
 EOF
 chmod 0755 "$BIN_TMP"
-cp "$BASE/public/vanta.svg" "$ICON_TMP"
-EXEC_PATH=$(printf '%s' "$BINDIR/vanta" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g')
+cp "$BASE/public/chronyx.svg" "$ICON_TMP"
+EXEC_PATH=$(printf '%s' "$BINDIR/chronyx" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g')
 cat > "$ENTRY_TMP" <<EOF
 [Desktop Entry]
-Name=VANTA Competition Tracker
+Name=CHRONYX Competition Tracker
 Comment=Track competitions, deadlines and reminders
 Exec="$EXEC_PATH"
-Icon=vanta
+Icon=chronyx
 Terminal=false
 Type=Application
 Categories=Office;
@@ -73,12 +73,16 @@ EOF
 if [ -e "$APPDIR" ]; then mv -- "$APPDIR" "$BACKUP"; OLD_MOVED=1; fi
 mv -- "$STAGE" "$APPDIR"
 NEW_MOVED=1
-mv -f -- "$BIN_TMP" "$BINDIR/vanta"
+mv -f -- "$BIN_TMP" "$BINDIR/chronyx"
 mv -f -- "$ENTRY_TMP" "$APP_ENTRY"
 mv -f -- "$ICON_TMP" "$ICON"
 rm -rf -- "$ARCHIVE"
 COMMITTED=1
 if [ -d "$BACKUP" ]; then rm -rf -- "$BACKUP" || echo "Warning: old application files remain at $BACKUP" >&2; fi
+# Remove the files of earlier releases that were named VANTA (data is kept and migrated on first launch).
+rm -rf -- "$LIBDIR/vanta"
+rm -f -- "$BINDIR/vanta" "$DATADIR/applications/vanta.desktop" "$DATADIR/icons/hicolor/scalable/apps/vanta.svg"
 trap - EXIT HUP INT TERM
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$DATADIR/applications" || true
-echo 'Installed VANTA for this user. Launch it from the applications menu or run ~/.local/bin/vanta.'
+echo 'Installed CHRONYX for this user. Launch it from the applications menu or run ~/.local/bin/chronyx.'
+echo 'If you used VANTA before, CHRONYX copies your competitions the first time it starts; the old data folder is left untouched.'

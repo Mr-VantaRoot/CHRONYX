@@ -61,16 +61,16 @@ if (-not $env:LOCALAPPDATA -or -not $env:APPDATA) {
 }
 
 $InstallParent = Join-Path $env:LOCALAPPDATA 'Programs'
-$Install = Join-Path $InstallParent 'VANTA'
-$Staging = Join-Path $InstallParent ".VANTA-stage-$PID"
-$Previous = Join-Path $InstallParent ".VANTA-previous-$PID"
+$Install = Join-Path $InstallParent 'CHRONYX'
+$Staging = Join-Path $InstallParent ".CHRONYX-stage-$PID"
+$Previous = Join-Path $InstallParent ".CHRONYX-previous-$PID"
 $StartMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-$ShortcutPath = Join-Path $StartMenu 'VANTA Competition Tracker.lnk'
-$UninstallShortcutPath = Join-Path $StartMenu 'Uninstall VANTA Competition Tracker.lnk'
-$ShortcutStage = Join-Path $StartMenu ".VANTA-shortcut-$PID.lnk"
-$UninstallShortcutStage = Join-Path $StartMenu ".VANTA-uninstall-$PID.lnk"
-$PreviousShortcut = Join-Path $StartMenu ".VANTA-shortcut-previous-$PID.lnk"
-$PreviousUninstallShortcut = Join-Path $StartMenu ".VANTA-uninstall-previous-$PID.lnk"
+$ShortcutPath = Join-Path $StartMenu 'CHRONYX Competition Tracker.lnk'
+$UninstallShortcutPath = Join-Path $StartMenu 'Uninstall CHRONYX Competition Tracker.lnk'
+$ShortcutStage = Join-Path $StartMenu ".CHRONYX-shortcut-$PID.lnk"
+$UninstallShortcutStage = Join-Path $StartMenu ".CHRONYX-uninstall-$PID.lnk"
+$PreviousShortcut = Join-Path $StartMenu ".CHRONYX-shortcut-previous-$PID.lnk"
+$PreviousUninstallShortcut = Join-Path $StartMenu ".CHRONYX-uninstall-previous-$PID.lnk"
 $OldMoved = $false
 $NewMoved = $false
 $OldShortcutMoved = $false
@@ -140,8 +140,20 @@ try {
             catch { Write-Warning "Installation succeeded, but a previous shortcut backup remains at $OldShortcut" }
         }
     }
-    Write-Host "Installed CHRONYX for this user (Python $PythonVersion, WebView2 $WebViewVersion). Open VANTA Competition Tracker from the Start menu."
-    Write-Host "Competition data remains in $env:APPDATA\VANTA."
+    # Remove the files of earlier releases that were named VANTA (data is kept and migrated on first launch).
+    $LegacyPaths = @(
+        (Join-Path $InstallParent 'VANTA'),
+        (Join-Path $StartMenu 'VANTA Competition Tracker.lnk'),
+        (Join-Path $StartMenu 'Uninstall VANTA Competition Tracker.lnk')
+    )
+    foreach ($LegacyPath in $LegacyPaths) {
+        if (Test-Path -LiteralPath $LegacyPath) {
+            try { Remove-Item -LiteralPath $LegacyPath -Recurse -Force }
+            catch { Write-Warning "Installation succeeded, but a previous VANTA file remains at $LegacyPath" }
+        }
+    }
+    Write-Host "Installed CHRONYX for this user (Python $PythonVersion, WebView2 $WebViewVersion). Open CHRONYX Competition Tracker from the Start menu."
+    Write-Host "Competition data lives in $env:APPDATA\CHRONYX. If you used VANTA before, CHRONYX copies your competitions from $env:APPDATA\VANTA the first time it starts; that old folder is left untouched."
 }
 catch {
     if (-not $Committed) {
