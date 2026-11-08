@@ -52,10 +52,17 @@ export function CalendarPage({events, month, setMonth, open}: CalendarPageProps)
     };
     return tags[category] ?? category.slice(0, 4).toUpperCase();
   };
-  const marker = (item: CalendarItem, key: string) => {
+  // Month cells are tight, so they show only a short tag; list views keep the full label.
+  const marker = (item: CalendarItem, key: string, compact = false) => {
     const {event, kind} = item;
     const deadline = kind === 'deadline';
     const tag = deadline ? 'DL' : categoryTag(event.category);
+    const startKey = calendarDayKey(event.start, event.timezone);
+    const label = deadline
+      ? 'Deadline'
+      : key === startKey
+        ? fmt(event.start, {hour: '2-digit', minute: '2-digit', timeZone: event.timezone})
+        : 'Continues';
     return (
       <button
         key={`${event.id}:${kind}:${key}`}
@@ -64,7 +71,14 @@ export function CalendarPage({events, month, setMonth, open}: CalendarPageProps)
         className={`calendar-event ${deadline ? 'calendar-deadline' : ''}`}
         onClick={() => open(event)}
       >
-        {tag}
+        {compact ? (
+          tag
+        ) : (
+          <>
+            {label} · {event.name}
+            <small>{deadline ? 'Registration closes' : event.category}</small>
+          </>
+        )}
       </button>
     );
   };
@@ -146,7 +160,7 @@ export function CalendarPage({events, month, setMonth, open}: CalendarPageProps)
                     key={key}
                   >
                     <span>{d}</span>
-                    {items.map((item) => marker(item, key))}
+                    {items.map((item) => marker(item, key, true))}
                   </div>
                 );
               },
