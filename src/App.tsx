@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AlarmClock,
   ArrowDownWideNarrow,
+  Bell,
   CalendarDays,
   ChevronDown,
   ChevronRight,
@@ -30,6 +31,7 @@ import {EventCard} from './EventCard';
 import {Dashboard} from './Dashboard';
 import {Editor} from './Editor';
 import {CalendarPage} from './CalendarPage';
+import {RemindersPage} from './RemindersPage';
 import {SettingsPage} from './SettingsPage';
 
 const blank = (): Event => ({
@@ -59,6 +61,7 @@ function readLocal(key: string, fallback = '') {
 const navItems: [LucideIcon, string][] = [
   [LayoutDashboard, 'Dashboard'],
   [List, 'All Competitions'],
+  [Bell, 'Reminders'],
   [CalendarDays, 'Calendar'],
   [Clock3, 'Upcoming'],
   [AlarmClock, 'Registration Deadlines'],
@@ -347,6 +350,8 @@ function App() {
               exportData={exportData}
               importJSON={importJSON}
             />
+          ) : view === 'Reminders' ? (
+            <RemindersPage events={events} now={tick} open={open} openSettings={() => setView('Settings')} />
           ) : view === 'Calendar' ? (
             <CalendarPage events={events} month={month} setMonth={setMonth} open={open} />
           ) : (
