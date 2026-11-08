@@ -102,13 +102,14 @@ export function RemindersPage({events, now, open, openSettings}: RemindersPagePr
   const items = useMemo(() => buildReminderItems(events, prefs, now), [events, prefs, now]);
   const coveredEvents = new Set(items.map((item) => item.event.id)).size;
   const deadlines = items.filter((item) => item.target === 'deadline').length;
-  const next = items[0];
 
   return (
     <>
       <div className="page-heading">
         <div>
-          <div className="eyebrow"><Bell size={12} /> PERSONAL REMINDER SCHEDULE</div>
+          <div className="eyebrow">
+            <Bell size={12} /> PERSONAL REMINDER SCHEDULE
+          </div>
           <h1>Reminders</h1>
           <p>See when your next alerts are scheduled and how much time remains for each event.</p>
         </div>
@@ -117,21 +118,34 @@ export function RemindersPage({events, now, open, openSettings}: RemindersPagePr
         </button>
       </div>
 
-      {settingsError && <div className="notice" role="status">{settingsError} Showing saved reminder defaults.</div>}
+      {settingsError && (
+        <div className="notice" role="status">
+          {settingsError} Showing saved reminder defaults.
+        </div>
+      )}
 
       <div className="reminder-stats">
         <section className="reminder-stat">
-          <div><Bell size={15} /><span>UPCOMING ALERTS</span></div>
+          <div>
+            <Bell size={15} />
+            <span>UPCOMING ALERTS</span>
+          </div>
           <strong>{items.length}</strong>
           <small>Next configured notification points</small>
         </section>
         <section className="reminder-stat">
-          <div><CalendarClock size={15} /><span>COMPETITIONS COVERED</span></div>
+          <div>
+            <CalendarClock size={15} />
+            <span>COMPETITIONS COVERED</span>
+          </div>
           <strong>{coveredEvents}</strong>
           <small>With at least one upcoming alert</small>
         </section>
         <section className="reminder-stat">
-          <div><Clock3 size={15} /><span>DEADLINE ALERTS</span></div>
+          <div>
+            <Clock3 size={15} />
+            <span>DEADLINE ALERTS</span>
+          </div>
           <strong>{deadlines}</strong>
           <small>Registration deadlines with alerts ahead</small>
         </section>
@@ -183,10 +197,14 @@ export function RemindersPage({events, now, open, openSettings}: RemindersPagePr
         ))}
         {!items.length && (
           <div className="reminder-empty">
-            <span><Bell size={20} /></span>
+            <span>
+              <Bell size={20} />
+            </span>
             <h3>No upcoming reminders</h3>
             <p>Add an event with a future start or registration deadline, or adjust your reminder windows.</p>
-            <button className="outline-button" onClick={openSettings}>Review reminder settings</button>
+            <button className="outline-button" onClick={openSettings}>
+              Review reminder settings
+            </button>
           </div>
         )}
       </div>
